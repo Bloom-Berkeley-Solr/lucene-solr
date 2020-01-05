@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import com.carrotsearch.randomizedtesting.RandomizedRunner;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.SolrTestCaseJ4;
@@ -60,6 +61,15 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mockito;
+import org.mockito.junit.MockitoJUnitRunner;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @Slow
 @SolrTestCaseJ4.SuppressSSL
@@ -81,7 +91,9 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         .configure();
 
     String collection;
-    useAlias = random().nextBoolean();
+//    useAlias = random().nextBoolean();
+    useAlias = false;
+
     if (useAlias) {
       collection = COLLECTIONORALIAS + "_collection";
     } else {
@@ -2082,6 +2094,132 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         dstream.shutdown();
         tuple = dstream.read();
         assertTrue(tuple.EOF);
+      } finally {
+        dstream.close();
+      }
+    } finally {
+      cache.close();
+    }
+  }
+
+  @Test
+  public void testAlertStream() throws Exception {
+    Assume.assumeTrue(!useAlias);
+
+    new UpdateRequest()
+        .add(id, "0", "a_s", "hello", "a_i", "0", "a_f", "1")
+        .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
+        .add(id, "3", "a_s", "hello", "a_i", "3", "a_f", "3")
+        .add(id, "4", "a_s", "hello", "a_i", "4", "a_f", "4")
+        .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "5")
+        .add(id, "5", "a_s", "hello", "a_i", "10", "a_f", "6")
+        .add(id, "6", "a_s", "hello", "a_i", "11", "a_f", "7")
+        .add(id, "7", "a_s", "hello", "a_i", "12", "a_f", "8")
+        .add(id, "8", "a_s", "hello", "a_i", "13", "a_f", "9")
+        .add(id, "9", "a_s", "hello", "a_i", "14", "a_f", "10")
+        .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+    StreamFactory factory = new StreamFactory()
+        .withCollectionZkHost("collection1", cluster.getZkServer().getZkAddress())
+        .withFunctionName("topic", TopicStream.class)
+        .withFunctionName("search", CloudSolrStream.class)
+        .withFunctionName("update", UpdateStream.class)
+        .withFunctionName("daemon", DaemonStream.class)
+        .withFunctionName("alert", AlertStream.class);
+
+    StreamExpression expression;
+    TupleStream stream;
+    List<Tuple> tuples;
+
+    SolrClientCache cache = new SolrClientCache();
+
+    try {
+      //Test with the AlertStream
+      AlertStream astream = null;
+      try {
+        //Test with emailAlert
+        expression = StreamExpressionParser.parse("alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2), " +
+                                                          "emailRecipient=\"testalertstream@gmail.com\", " +
+                                                          "emailTitle=\"AlertStream Test Email\")");
+        astream = (AlertStream) factory.constructStream(expression);
+        StreamContext context = new StreamContext();
+        context.setSolrClientCache(cache);
+        astream.setStreamContext(context);
+
+        // Mock the alert stream
+        astream = Mockito.spy(astream);
+        doNothing().when(astream).emailAlert(any(Tuple.class));
+
+        // The initial call to the topic function establishes the checkpoints for the specific topic ID
+        getTuples(astream);
+
+        // Index a few more documents
+        new UpdateRequest()
+            .add(id, "12", "a_s", "hello", "a_i", "13", "a_f", "9")
+            .add(id, "13", "a_s", "helloWorld", "a_i", "14", "a_f", "10")
+            .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        tuples = getTuples(astream);
+        assertEquals(tuples.size(), 1);
+        Tuple tuple = tuples.get(0);
+        assertEquals(tuple.get("id"), "12");
+        verify(astream, times(1)).alert(tuple);
+        verify(astream, times(1)).emailAlert(tuple);
+
+        //Test without email Alert
+        expression = StreamExpressionParser.parse("alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2))");
+        astream = (AlertStream) factory.constructStream(expression);
+        context = new StreamContext();
+        context.setSolrClientCache(cache);
+        astream.setStreamContext(context);
+
+        astream = Mockito.spy(astream);
+        doNothing().when(astream).emailAlert(any(Tuple.class));
+
+        // The initial call to the topic function establishes the checkpoints for the specific topic ID
+        getTuples(astream);
+
+        // Index a few more documents
+        new UpdateRequest()
+          .add(id, "14", "a_s", "hello", "a_i", "15", "a_f", "11")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        tuples = getTuples(astream);
+        verify(astream, times(1)).alert(tuples.get(0));
+        verify(astream, times(0)).emailAlert(tuples.get(0));
+
+      } finally {
+        astream.close();
+      }
+
+      // test with daemon stream
+      DaemonStream dstream = null;
+      try {
+        // queue size should be set to 0 (default) in production
+        expression = StreamExpressionParser.parse("daemon(id=\"test\", runInterval=\"50\", queueSize=\"9\"," +
+          "update(collection1, batchSize=100, " +
+          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2))))"
+        );
+        dstream = (DaemonStream) factory.constructStream(expression);
+        StreamContext context = new StreamContext();
+        context.setSolrClientCache(cache);
+        dstream.setStreamContext(context);
+
+       dstream.open();
+
+        // Index a few more documents
+        new UpdateRequest()
+            .add(id, "12", "a_s", "hello", "a_i", "13", "a_f", "9")
+            .add(id, "13", "a_s", "hello", "a_i", "13", "a_f", "9")
+            .add(id, "14", "a_s", "helloWorld", "a_i", "14", "a_f", "10")
+            .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        Tuple tuple = dstream.read();
+        assertEquals(2, tuple.get(UpdateStream.BATCH_INDEXED_FIELD_NAME));
+
+        dstream.shutdown();
+        tuple = dstream.read();
+        assertEquals(true, tuple.EOF);
       } finally {
         dstream.close();
       }
