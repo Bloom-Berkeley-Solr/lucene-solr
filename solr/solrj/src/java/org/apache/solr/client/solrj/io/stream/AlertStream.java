@@ -17,17 +17,9 @@
 
 package org.apache.solr.client.solrj.io.stream;
 
-// import javax.mail.Message;
-// import javax.mail.MessagingException;
-// import javax.mail.PasswordAuthentication;
-// import javax.mail.Session;
-// import javax.mail.Transport;
-// import javax.mail.internet.InternetAddress;
-// import javax.mail.internet.MimeMessage;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
 
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.StreamComparator;
@@ -35,47 +27,29 @@ import org.apache.solr.client.solrj.io.stream.expr.Explanation;
 import org.apache.solr.client.solrj.io.stream.expr.Expressible;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExplanation;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
-import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionNamedParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
-import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
 
 public class AlertStream extends TupleStream implements Expressible {
 
   TupleStream tupleStream;
-  String emailRecipient;
-  String emailTitle;
 
   public AlertStream(StreamExpression expression, StreamFactory factory) throws IOException {
     List<StreamExpression> streamExpressions = factory.getExpressionOperandsRepresentingTypes(expression, Expressible.class, TupleStream.class);
-    String emailRecipient = null;
-    String emailTitle = null;
 
     // parameters by position
     TupleStream tupleStream = factory.constructStream(streamExpressions.get(0));
-    StreamExpressionNamedParameter recipientExpression = factory.getNamedOperand(expression, "emailRecipient");
-    StreamExpressionNamedParameter titleExpression = factory.getNamedOperand(expression, "emailTitle");
 
-    if(recipientExpression != null) {
-      emailRecipient= ((StreamExpressionValue) recipientExpression.getParameter()).getValue();
-    }
-
-    if(titleExpression != null) {
-      emailTitle= ((StreamExpressionValue) titleExpression.getParameter()).getValue();
-    }
-
-    init(tupleStream, emailRecipient, emailTitle);
+    init(tupleStream);
   }
 
-  public void init(TupleStream tupleStream, String emailRecipient, String emailTitle) {
+  public void init(TupleStream tupleStream) {
     this.tupleStream = tupleStream;
-    this.emailRecipient = emailRecipient;
-    this.emailTitle = emailTitle;
   }
 
-  public AlertStream(TupleStream tupleStream, String emailRecipient, String emailTitle) {
-    init(tupleStream, emailRecipient, emailTitle);
+  public AlertStream(TupleStream tupleStream) {
+    init(tupleStream);
   }
 
   @Override
@@ -107,7 +81,6 @@ public class AlertStream extends TupleStream implements Expressible {
     if(!tuple.EOF) {
       alert(tuple);
     }
-
     return tuple;
   }
 
@@ -118,11 +91,6 @@ public class AlertStream extends TupleStream implements Expressible {
 
   @Override
   public StreamExpressionParameter toExpression(StreamFactory factory) throws IOException {
-    return toExpression(factory, true);
-  }
-
-  public StreamExpressionParameter toExpression(StreamFactory factory, boolean includeStream) throws IOException {
-    // TODO: add more parameters
     StreamExpression expression = new StreamExpression(factory.getFunctionName(this.getClass()));
     expression.addParameter(((Expressible) tupleStream).toExpression(factory));
     return expression;
@@ -137,47 +105,10 @@ public class AlertStream extends TupleStream implements Expressible {
         .withFunctionName(factory.getFunctionName(this.getClass()))
         .withImplementingClass(this.getClass().getName())
         .withExpressionType(Explanation.ExpressionType.STREAM_DECORATOR)
-        .withExpression(toExpression(factory, false).toString());
+        .withExpression(toExpression(factory).toString());
   }
 
   void alert(Tuple tuple) {
-    if (emailRecipient != null && emailTitle != null) {
-      emailAlert(tuple);
-    }
-  }
-
-  void emailAlert(Tuple tuple){
-//     final String username = "testalertstream@gmail.com";
-//     final String password = "test1234!";
-//
-//     Properties prop = new Properties();
-//     prop.put("mail.smtp.host", "smtp.gmail.com");
-//     prop.put("mail.smtp.port", "587");
-//     prop.put("mail.smtp.auth", "true");
-//     prop.put("mail.smtp.starttls.enable", "true"); //TLS
-//
-//     Session session = Session.getInstance(prop,
-//       new javax.mail.Authenticator() {
-//         protected PasswordAuthentication getPasswordAuthentication() {
-//           return new PasswordAuthentication(username, password);
-//         }
-//       });
-//
-//     try {
-//       Message message = new MimeMessage(session);
-//       message.setFrom(new InternetAddress(username));
-//       message.setRecipients(
-//         Message.RecipientType.TO,
-//         //TODO: can change emailRecipient to list
-//         InternetAddress.parse(this.emailRecipient)
-//       );
-//       message.setSubject(this.emailTitle);
-//       message.setText("Hi Solr," + "\n\nThis is a test email for matching: " + tuple.fields.toString());
-//
-//       Transport.send(message);
-//
-//     } catch (MessagingException e) {
-//       e.printStackTrace();
-//     }
+    //TODO: Add alert actions
   }
 }

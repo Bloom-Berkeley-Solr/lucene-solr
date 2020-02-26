@@ -44,6 +44,8 @@ public class Lang {
         .withFunctionName("commit", CommitStream.class)
         .withFunctionName("random", RandomFacadeStream.class)
         .withFunctionName("knnSearch", KnnStream.class)
+        .withFunctionName("percolate", PercolateStream.class)
+        .withFunctionName("alert", AlertStream.class)
 
 
             // decorator streams
