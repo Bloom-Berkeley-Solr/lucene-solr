@@ -18,8 +18,10 @@
 package org.apache.solr.update.processor;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.monitor.MatchingQueries;
@@ -114,8 +116,10 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
         // TODO: which MatcherFactory to use?
         // TODO: We must set forInPlaceUpdate=True to avoid copy fields, figure out why
         MatchingQueries<QueryMatch> matches = monitor.match(DocumentBuilder.toDocument(cmd.getSolrInputDocument(), req.getSchema()), QueryMatch.SIMPLE_MATCHER);
+        List<String> matchedIds = new ArrayList<>();
+        matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));
         this.rsp.add("match_count", matches.getMatchCount());
-        this.rsp.add("matches", matches.getMatches());
+        this.rsp.add("matches", matchedIds);
         super.processAdd(cmd);
       }
     } catch (KeeperException | InterruptedException ex) {
