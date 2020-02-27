@@ -749,9 +749,8 @@
   <!-- A request handler that returns indented JSON by default -->
   <requestHandler name="/register" class="solr.QueryRegisterHandler">
     <lst name="defaults">
-      <str name="echoParams">explicit</str>
-      <str name="wt">json</str>
-      <str name="indent">true</str>
+      <str name="id">defaultId</str>
+      <str name="q">*;*</str>
     </lst>
   </requestHandler>
 

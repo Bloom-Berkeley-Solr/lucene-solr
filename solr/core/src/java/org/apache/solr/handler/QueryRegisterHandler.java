@@ -17,16 +17,49 @@
 
 package org.apache.solr.handler;
 
+import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.lucene.monitor.MonitorQuery;
+import org.apache.lucene.monitor.MonitorQuerySerializer;
+import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
+import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
+import org.apache.lucene.search.Query;
+import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.core.CoreContainer;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
+import org.apache.solr.update.processor.MonitorUpdateProcessorFactory;
 
 public class QueryRegisterHandler extends RequestHandlerBase {
+
+  static Query parse(String query) {
+    try {
+      StandardQueryParser parser = new StandardQueryParser();
+      return parser.parse(query, "defaultField");
+    } catch (QueryNodeException e) {
+      throw new IllegalArgumentException(e);
+    }
+  }
+
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
-    Map<String,Object> json = req.getJSON();
-    System.out.println("Test for register.");
+    CoreContainer cc = req.getCore().getCoreContainer();
+    SolrZkClient client = cc.getZkController().getZkClient();
+    SolrParams params = req.getParams();
+    String q = params.get("q");
+    String queryId = params.get("id");
+    MonitorQuerySerializer serializer = MonitorQuerySerializer.fromParser(QueryRegisterHandler::parse);
+    MonitorQuery mq = new MonitorQuery(queryId, null, q, new HashMap<>());
+
+    String collection = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    String path = MonitorUpdateProcessorFactory.zkParentPath + '/' + collection + '/' + queryId;
+    if (!client.exists(path, true)) {
+      client.makePath(path, true);
+    }
+    byte[] bytes = serializer.serialize(mq).bytes;
+    client.setData(path, bytes, true);
   }
 
   @Override

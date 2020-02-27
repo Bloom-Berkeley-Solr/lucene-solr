@@ -60,22 +60,6 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
     collection = cloudDesc.getCollectionName();
     this.req = req;
     this.rsp = rsp;
-
-    // FIXME: for temporary test only
-    var client = zkController.getZkClient();
-    String path = MonitorUpdateProcessorFactory.zkParentPath + '/' + collection;
-    String queryString = "name: \"qzq\"";
-
-    String testPath = path + '/' + "whatever-test";
-    MonitorQuery mq = new MonitorQuery("id", parse(queryString), queryString, new HashMap<String, String>());
-    MonitorQuerySerializer serializer = MonitorQuerySerializer.fromParser(MonitorUpdateProcessor::parse);
-    byte[] bytes = serializer.serialize(mq).bytes;
-    try {
-      if (!client.exists(testPath, true)) client.makePath(testPath, true);
-      client.setData(testPath, bytes, true);
-    } catch (Exception e) {
-      e.printStackTrace();
-    }
   }
 
   // TODO: what parse function should we use?
@@ -120,6 +104,7 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
         matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));
         this.rsp.add("match_count", matches.getMatchCount());
         this.rsp.add("matches", matchedIds);
+        this.rsp.add("test","hee");
         super.processAdd(cmd);
       }
     } catch (KeeperException | InterruptedException ex) {
