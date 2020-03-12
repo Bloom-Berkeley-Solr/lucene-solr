@@ -188,8 +188,21 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       daemonStream.setDaemons(daemons);
       daemonStream.open(); // This will start the deamonStream
       daemons.put(daemonStream.getId(), daemonStream);
-      rsp.add("result-set", new DaemonResponseStream("Deamon:" + daemonStream.getId() + " started on " + coreName));
-    } else {
+      rsp.add("result-set", new DaemonResponseStream("Daemon:" + daemonStream.getId() + " started on " + coreName));
+
+    } else if (tupleStream instanceof MonitorStream) {
+      MonitorStream monitorStream = (MonitorStream) tupleStream;
+      DaemonStream daemonStream = monitorStream.getDaemonStream();
+      if (daemons.containsKey(daemonStream.getId())) {
+        daemons.remove(daemonStream.getId()).close();
+      }
+      daemonStream.setDaemons(daemons);
+      daemonStream.open(); // This will start the deamonStream
+      daemons.put(daemonStream.getId(), daemonStream);
+      rsp.add("result-set", new DaemonResponseStream("Daemon:" + daemonStream.getId() + " started on " + coreName));
+    }
+
+    else {
       rsp.add("result-set", new TimerStream(new ExceptionStream(tupleStream)));
     }
   }

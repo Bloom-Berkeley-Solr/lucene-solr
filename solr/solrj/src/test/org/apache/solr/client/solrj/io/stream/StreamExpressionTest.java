@@ -32,7 +32,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import com.carrotsearch.randomizedtesting.RandomizedRunner;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.SolrTestCaseJ4;
@@ -62,12 +61,9 @@ import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -2103,7 +2099,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
   }
 
   @Test
-  public void testPercolateStream() throws Exception {
+  public void testMonitorStream() throws Exception {
     Assume.assumeTrue(!useAlias);
 
     CollectionAdminRequest.createCollection("destinationCollection", "conf", 2, 1).process(cluster.getSolrClient());
@@ -2117,15 +2113,14 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       .withFunctionName("update", UpdateStream.class)
       .withFunctionName("daemon", DaemonStream.class)
       .withFunctionName("alert", AlertStream.class)
-      .withFunctionName("percolate", PercolateStream.class);
+      .withFunctionName("monitor", MonitorStream.class);
 
     StreamExpression expression;
     List<Tuple> tuples;
 
     SolrClientCache cache = new SolrClientCache();
-
     try {
-      PercolateStream pstream = null;
+      MonitorStream pstream = null;
       TupleStream topicStream = null;
       TupleStream searchStream = null;
 
@@ -2142,17 +2137,31 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         assertEquals(tuples.size(), 0);
         cluster.getSolrClient().commit("collection1");
 
+        /* Test with the AlertStream */
+//        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"alert\", collection1, fl=\"id\", q=\"a_s:hello\")");
+//        pstream = (MonitorStream) factory.constructStream(expression);
+//        pstream.setStreamContext(context);
+//        pstream.open();
+//
+//        // Index a few more documents
+//        new UpdateRequest()
+//          .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "1")
+//          .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
+//          .add(id, "3", "a_s", "helloWorld", "a_i", "3", "a_f", "3")
+//          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        /* Test with the UpdateStream */
+        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"update\", collection1, destinationCollection, fl=\"id\", q=\"a_s:hello\")");
+        pstream = (MonitorStream) factory.constructStream(expression);
+        pstream.setStreamContext(context);
+        pstream.open();
+
         expression = StreamExpressionParser.parse("search(destinationCollection, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_i asc\")");
         searchStream = new CloudSolrStream(expression, factory);
         searchStream.setStreamContext(context);
 
         //Ensure that destinationCollection is empty before the update.
         assertEquals("destinationCollection should be empty before update", 0, getTuples(searchStream).size());
-
-        expression = StreamExpressionParser.parse("percolate(id=\"test\", destinationCollection, collection1, fl=\"id\", q=\"a_s:hello\")");
-        pstream = (PercolateStream) factory.constructStream(expression);
-        pstream.setStreamContext(context);
-        pstream.open();
 
         // Index a few more documents
         new UpdateRequest()
@@ -2184,9 +2193,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
   public void testAlertStream() throws Exception {
     Assume.assumeTrue(!useAlias);
 
-    CollectionAdminRequest.createCollection("destinationCollection", "conf", 2, 1).process(cluster.getSolrClient());
-    cluster.waitForActiveCollection("destinationCollection", 2, 2);
-
     new UpdateRequest()
         .add(id, "0", "a_s", "hello", "a_i", "0", "a_f", "1")
         .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
@@ -2202,7 +2208,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
     StreamFactory factory = new StreamFactory()
         .withCollectionZkHost("collection1", cluster.getZkServer().getZkAddress())
-        .withCollectionZkHost("destinationCollection", cluster.getZkServer().getZkAddress())
         .withFunctionName("topic", TopicStream.class)
         .withFunctionName("search", CloudSolrStream.class)
         .withFunctionName("update", UpdateStream.class)
@@ -2239,7 +2244,10 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         tuples = getTuples(astream);
 
         assertEquals(2, tuples.size());
+        assertEquals("10", tuples.get(0).get("id"));
+        assertEquals("11", tuples.get(1).get("id"));
         verify(astream, times(1)).alert(tuples.get(0));
+        verify(astream, times(1)).alert(tuples.get(1));
       } finally {
         astream.close();
       }
@@ -2254,19 +2262,10 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         context.setSolrClientCache(cache);
 
         expression = StreamExpressionParser.parse("daemon(id=\"test\", runInterval=\"50\", queueSize=\"9\"," +
-          "update(destinationCollection, batchSize=2, " +
-          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2))))"
+          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2)))"
         );
         dstream = (DaemonStream) factory.constructStream(expression);
         dstream.setStreamContext(context);
-
-        //Ensure that destinationCollection is empty before the update.
-        expression = StreamExpressionParser.parse("search(destinationCollection, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_i asc\")");
-        searchStream = new CloudSolrStream(expression, factory);
-        searchStream.setStreamContext(context);
-        assertEquals("destinationCollection should be empty before update", 0, getTuples(searchStream).size());
-
-        dstream.open();
 
         //Index a few more documents
         new UpdateRequest()
@@ -2275,16 +2274,16 @@ public class StreamExpressionTest extends SolrCloudTestCase {
           .add(id, "16", "a_s", "hellohello", "a_i", "14", "a_f", "10")
           .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
 
-        //Read from the same DaemonStream stream
-        Tuple tuple = dstream.read();
-        assertEquals(2, tuple.get("batchIndexed"));
-        cluster.getSolrClient().commit("collection1");
+        dstream.open();
 
-        //Ensure that destinationCollection actually has the new docs.
-        cluster.getSolrClient().commit("destinationCollection");
-        assertEquals( 2, getTuples(searchStream).size());
+        Tuple tuple = dstream.read();
+        assertEquals("14", tuple.get(id));
+        tuple = dstream.read();
+        assertEquals("15", tuple.get(id));
 
         dstream.shutdown();
+        tuple = dstream.read();
+        assertEquals(true, tuple.EOF);
 
       } finally {
         dstream.close();

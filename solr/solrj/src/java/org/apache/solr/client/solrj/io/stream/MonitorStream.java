@@ -39,31 +39,26 @@ import org.apache.solr.common.params.SolrParams;
 
 import static org.apache.solr.common.params.CommonParams.ID;
 
-public class PercolateStream extends TupleStream implements Expressible {
+public class MonitorStream extends TupleStream implements Expressible {
 
   private DaemonStream daemonStream;
+  private final String UPDATE_OPERATOR = "update";
   String id = null;
+  String operator = null;
 
-  public PercolateStream(StreamExpression expression, StreamFactory factory) throws IOException {
+  public MonitorStream(StreamExpression expression, StreamFactory factory) throws IOException {
     // get parameters by index
-    String destinationCollection = factory.getValueOperand(expression, 1);
     String topicCollection = factory.getValueOperand(expression, 2);
-    verifyCollectionName(destinationCollection, expression);
     verifyCollectionName(topicCollection, expression);
 
     //zkHost
-    String zkHost = findZkHost(factory, destinationCollection, expression);
-    verifyZkHost(zkHost, destinationCollection, expression);
+    String zkHost = findZkHost(factory, topicCollection, expression);
+    verifyZkHost(zkHost, topicCollection, expression);
 
     List<StreamExpressionNamedParameter> namedParams = factory.getNamedOperands(expression);
     // Named parameters - passed directly to solr as solrparams
     if(0 == namedParams.size()){
       throw new IOException(String.format(Locale.ROOT,"invalid expression %s - at least one named parameter expected. eg. 'q=*:*'",expression));
-    }
-
-    StreamExpressionNamedParameter flParam = factory.getNamedOperand(expression, "fl");
-    if(null == flParam) {
-      throw new IOException("invalid TopicStream fl cannot be null");
     }
 
     StreamExpressionNamedParameter idExpression = factory.getNamedOperand(expression, ID);
@@ -73,35 +68,69 @@ public class PercolateStream extends TupleStream implements Expressible {
       id = ((StreamExpressionValue) idExpression.getParameter()).getValue();
     }
 
+    StreamExpressionNamedParameter operatorExpression = factory.getNamedOperand(expression, "operator");
+    if(operatorExpression == null) {
+      throw new IOException("Invalid expression operator parameter expected");
+    } else {
+       operator = ((StreamExpressionValue) operatorExpression.getParameter()).getValue();
+    }
+
+    StreamExpressionNamedParameter flParam = factory.getNamedOperand(expression, "fl");
+    if(null == flParam) {
+      throw new IOException("invalid TopicStream fl cannot be null");
+    }
+
     ModifiableSolrParams solrParams = new ModifiableSolrParams();
     for(StreamExpressionNamedParameter namedParam : namedParams){
-      if(!namedParam.getName().equals("zkHost") && !namedParam.getName().equals(ID)) {
+      if(!namedParam.getName().equals(ID) && !namedParam.getName().equals("operator")) {
         solrParams.set(namedParam.getName(), namedParam.getParameter().toString().trim());
       }
     }
 
+    if (operator.equals(UPDATE_OPERATOR)) {
+      String destinationCollection = factory.getValueOperand(expression, 3);
+      verifyCollectionName(destinationCollection, expression);
+      init(id, destinationCollection, topicCollection, zkHost, solrParams);
+
+    } else {
+      init(id, topicCollection, zkHost, solrParams);
+    }
+  }
+
+  public MonitorStream(String id, String topicCollection, String destinationCollection, String zkHost, SolrParams solrParams) throws IOException{
     init(destinationCollection, topicCollection, id, zkHost, solrParams);
   }
 
-  public PercolateStream(String destinationCollection, String topicCollection, String id, String zkHost, SolrParams solrParams) throws IOException{
-    init(destinationCollection, topicCollection, id, zkHost, solrParams);
-
+  public MonitorStream(String id, String topicCollection, String zkHost, SolrParams solrParams) throws IOException{
+    init(topicCollection, id, zkHost, solrParams);
   }
 
-  public void init(String destinationCollection, String topicCollection, String id, String zkHost, SolrParams solrParams) throws IOException{
-    //TODO: whether or not add more parameters instead of default: e.g. runInterval, checkpointEvery, batchSize
+  public void init(String id, String topicCollection, String zkHost, SolrParams solrParams) throws IOException {
     long initialCheckpoint = -1;
-    long checkpointEvery = 2;
-    int updateBatchSize = 100;
+    long checkpointEvery = -1;
     long runInterval = 50;
     int queueSize = 0;
 
     String topicId = "percolate-".concat(UUID.randomUUID().toString());
     TopicStream topicStream = new TopicStream(zkHost, topicCollection, topicCollection, topicId,
-                                              initialCheckpoint, checkpointEvery, solrParams);
-    AlertStream alertStream = new AlertStream(topicStream);
-    UpdateStream updateStream = new UpdateStream(destinationCollection, alertStream, zkHost, updateBatchSize);
+      initialCheckpoint, checkpointEvery, solrParams);
 
+    AlertStream alertStream = new AlertStream(topicStream);
+    this.daemonStream = new DaemonStream(alertStream, id, runInterval, queueSize);
+  }
+
+    public void init(String id, String destinationCollection, String topicCollection, String zkHost, SolrParams solrParams) throws IOException{
+    long initialCheckpoint = -1;
+    long checkpointEvery = -1;
+    long runInterval = 50;
+    int updateBatchSize = 100;
+    int queueSize = 0;
+
+    String topicId = "percolate-".concat(UUID.randomUUID().toString());
+    TopicStream topicStream = new TopicStream(zkHost, topicCollection, topicCollection, topicId,
+                                              initialCheckpoint, checkpointEvery, solrParams);
+
+    UpdateStream updateStream = new UpdateStream(destinationCollection, topicStream, zkHost, updateBatchSize);
     this.daemonStream = new DaemonStream(updateStream, id, runInterval, queueSize);
   }
 
@@ -129,9 +158,9 @@ public class PercolateStream extends TupleStream implements Expressible {
 
   @Override
   public Tuple read() throws IOException {
+    // Can't directly return daemonStream since queuesize for daemonStream is 0
     //TODO: change return EOF to use queue as daemonStream
     HashMap m = new HashMap();
-//    m.put("EOF", true);
     return new Tuple(m);
   }
 
@@ -155,6 +184,10 @@ public class PercolateStream extends TupleStream implements Expressible {
       .withImplementingClass(this.getClass().getName())
       .withExpressionType(Explanation.ExpressionType.STREAM_DECORATOR)
       .withExpression(toExpression(factory).toString());
+  }
+
+  public DaemonStream getDaemonStream() {
+    return daemonStream;
   }
 
   public void shutdown() {
