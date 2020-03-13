@@ -79,9 +79,7 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
       var client = zkController.getZkClient();
       String path = MonitorUpdateProcessorFactory.zkQueryPath;
       if (client.exists(path, true)) {
-        // create monitor & register queries
-        // TODO: use which analyzer and presearcher?
-        Monitor monitor = new Monitor(new StandardAnalyzer(), Presearcher.NO_FILTERING);
+        Monitor monitor = MonitorUpdateProcessorFactory.getMonitor();
 
         byte[] bytes = client.getData(path, null, null, true);
         if (bytes.length == 0) return;

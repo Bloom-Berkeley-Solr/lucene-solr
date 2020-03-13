@@ -17,20 +17,39 @@
 
 package org.apache.solr.update.processor;
 
-import org.apache.lucene.queryparser.classic.ParseException;
-import org.apache.lucene.queryparser.classic.QueryParser;
+import java.io.IOException;
+
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.monitor.Monitor;
+import org.apache.lucene.monitor.Presearcher;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 
-public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory{
+public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory {
 
   // TODO: store all queries in one zkNode
   public static final String zkQueryPath = "/monitor.json";
   // public static final String zkParentPath = "/monitor";
   public static final String parserDefaultField = "defaultField";
+
+  private static Monitor singletonMonitor = null;
+
+  public static Monitor getMonitor() {
+    if (singletonMonitor == null) {
+      try{
+        // TODO: use which analyzer and presearcher?
+        singletonMonitor = new Monitor(new StandardAnalyzer(), Presearcher.NO_FILTERING);
+      } catch (IOException ex) {
+        throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
+      }
+    }
+
+    return singletonMonitor;
+  }
 
 
   //TODO: which parser to use
