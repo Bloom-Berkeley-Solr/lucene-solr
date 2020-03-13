@@ -27,7 +27,9 @@ import org.apache.solr.response.SolrQueryResponse;
 
 public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory{
 
-  public static final String zkParentPath = "/monitor";
+  // TODO: store all queries in one zkNode
+  public static final String zkQueryPath = "/monitor.json";
+  // public static final String zkParentPath = "/monitor";
   public static final String parserDefaultField = "defaultField";
 
 

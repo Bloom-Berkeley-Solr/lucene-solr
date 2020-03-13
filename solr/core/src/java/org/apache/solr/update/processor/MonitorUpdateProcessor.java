@@ -33,7 +33,6 @@ import org.apache.lucene.monitor.QueryMatch;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.util.BytesRef;
 import org.apache.solr.cloud.CloudDescriptor;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
@@ -42,7 +41,7 @@ import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.AddUpdateCommand;
 import org.apache.solr.update.DocumentBuilder;
-import org.apache.zookeeper.KeeperException;
+import org.jose4j.json.JsonUtil;
 
 public class MonitorUpdateProcessor extends UpdateRequestProcessor {
 
@@ -78,24 +77,27 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
     try {
       // get queries from Zookeeper
       var client = zkController.getZkClient();
-      String path = MonitorUpdateProcessorFactory.zkParentPath + '/' + collection;
+      String path = MonitorUpdateProcessorFactory.zkQueryPath;
       if (client.exists(path, true)) {
-        // byte[] bytes = client.getData(path, null, null, true);
-        // BytesRef bytesRef = new BytesRef(bytes);
-
         // create monitor & register queries
         // TODO: use which analyzer and presearcher?
         Monitor monitor = new Monitor(new StandardAnalyzer(), Presearcher.NO_FILTERING);
-        MonitorQuerySerializer serializer = MonitorQuerySerializer.fromParser(MonitorUpdateProcessorFactory::parse);
 
-        List<String> children = client.getChildren(path, null, true);
-        for (String child : children) {
-          byte[] bytes = client.getData(path + '/' + child, null, null, true);
-          if (bytes.length == 0) continue;
-          BytesRef bytesRef = new BytesRef(bytes);
-          MonitorQuery monitorQuery = serializer.deserialize(bytesRef);
-          monitor.register(monitorQuery);
+        byte[] bytes = client.getData(path, null, null, true);
+        if (bytes.length == 0) return;
+        Map<String, Object> jsonMap = JsonUtil.parseJson(new String(bytes));
+
+        for (String queryId : jsonMap.keySet()) {
+          Object value = jsonMap.get(queryId);
+          // TODO: which type of exception?
+          if (!(value instanceof String))
+            throw new Exception("value of json object must be a string (query)");
+          String query = (String) value;
+          monitor.register(new MonitorQuery(queryId, MonitorUpdateProcessorFactory.parse(query), query, new HashMap<String, String>()));
         }
+        // BytesRef bytesRef = new BytesRef(bytes);
+        // MonitorQuery monitorQuery = serializer.deserialize(bytesRef);
+
 
         // TODO: which MatcherFactory to use?
         // TODO: We must set forInPlaceUpdate=True to avoid copy fields, figure out why
@@ -104,10 +106,9 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
         matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));
         this.rsp.add("match_count", matches.getMatchCount());
         this.rsp.add("matches", matchedIds);
-        this.rsp.add("test","hee");
         super.processAdd(cmd);
       }
-    } catch (KeeperException | InterruptedException ex) {
+    } catch (/*KeeperException | InterruptedException | JoseException |*/ Exception ex) {
       throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
     }
   }
