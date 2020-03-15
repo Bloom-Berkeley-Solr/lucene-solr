@@ -63,12 +63,12 @@ public class QueryRegisterHandler extends RequestHandlerBase {
 
 
     // TODO: concurrent modification?
-    byte[] readBytes = client.getData(path, null, null, true);
+    byte[] bytesRead = client.getData(path, null, null, true);
     String jsonStr;
-    if (readBytes == null)
+    if (bytesRead == null)
       jsonStr = "{}";
     else
-      jsonStr = new String(readBytes);
+      jsonStr = new String(bytesRead);
     Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
     // current behavior: overwrite, since Zookeeper guarantees atomic writes
     jsonMap.put(queryId, q);
