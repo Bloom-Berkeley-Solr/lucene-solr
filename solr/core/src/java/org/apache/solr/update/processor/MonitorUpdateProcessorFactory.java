@@ -19,6 +19,7 @@ package org.apache.solr.update.processor;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -74,6 +75,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
   // TODO: which parser to use
   public static Query parse(String query) {
     StandardQueryParser parser = new StandardQueryParser();
+    // QueryParser parser = new QueryParser(parserDefaultField, new StandardAnalyzer());
     try {
       return parser.parse(query, parserDefaultField);
     } catch (QueryNodeException e) {
@@ -103,8 +105,10 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     }
   }
 
-  void syncQueries() {
+  // FIXME: is it thread-safe?
+  synchronized void syncQueries() {
     try {
+      // TODO: watcher x 2? may be redundant
       if (client.exists(zkQueryPath, new MonitorWatcher(), true) == null) return;
       byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(), null, true);
       String jsonStr;

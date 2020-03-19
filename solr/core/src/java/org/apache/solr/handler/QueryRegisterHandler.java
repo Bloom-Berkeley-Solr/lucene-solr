@@ -18,6 +18,7 @@
 package org.apache.solr.handler;
 
 import java.lang.invoke.MethodHandles;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
@@ -57,23 +58,29 @@ public class QueryRegisterHandler extends RequestHandlerBase {
 
     // String collection = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
-    if (!client.exists(path, true)) {
-      client.makePath(path, true);
+
+
+    // FIXME: concurrent modification? do we need a lock to protect it
+    // "a single handler instance is reused for all relevant queries"
+    synchronized (this) {
+      if (!client.exists(path, true)) {
+        client.makePath(path, true);
+      }
+
+      byte[] bytesRead = client.getData(path, null, null, true);
+      String jsonStr;
+      if (bytesRead == null)
+        jsonStr = "{}";
+      else
+        jsonStr = new String(bytesRead);
+      Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
+      // current behavior: overwrite, since Zookeeper guarantees atomic writes
+      LinkedHashMap<String, Object> queryMap = new LinkedHashMap<>(jsonMap);
+      queryMap.put(queryId, q);
+      client.setData(path, JsonUtil.toJson(queryMap).getBytes(), true);
     }
-
-
-    // TODO: concurrent modification?
-    byte[] bytesRead = client.getData(path, null, null, true);
-    String jsonStr;
-    if (bytesRead == null)
-      jsonStr = "{}";
-    else
-      jsonStr = new String(bytesRead);
-    Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
-    // current behavior: overwrite, since Zookeeper guarantees atomic writes
-    jsonMap.put(queryId, q);
-    client.setData(path, JsonUtil.toJson(jsonMap).getBytes(), true);
   }
+
 
   @Override
   public String getDescription() {
