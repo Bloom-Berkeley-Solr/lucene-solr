@@ -750,7 +750,7 @@
   <requestHandler name="/register" class="solr.QueryRegisterHandler">
     <lst name="defaults">
       <str name="id">defaultId</str>
-      <str name="q">*;*</str>
+      <str name="q">*:*</str>
     </lst>
   </requestHandler>
 
@@ -1100,12 +1100,13 @@
     </lst>
   </updateProcessor>
 
+  <updateProcessor class="solr.MonitorUpdateProcessorFactory" name="monitor"/>
+
   <!-- The update.autoCreateFields property can be turned to false to disable schemaless mode -->
   <updateRequestProcessorChain name="add-unknown-fields-to-the-schema" default="${update.autoCreateFields:true}"
-           processor="uuid,remove-blank,field-name-mutating,parse-boolean,parse-long,parse-double,parse-date,add-schema-fields">
+           processor="uuid,remove-blank,field-name-mutating,parse-boolean,parse-long,parse-double,parse-date,add-schema-fields, monitor">
     <processor class="solr.LogUpdateProcessorFactory"/>
     <processor class="solr.DistributedUpdateProcessorFactory"/>
-    <processor class="solr.MonitorUpdateProcessorFactory"/>
     <processor class="solr.RunUpdateProcessorFactory"/>
   </updateRequestProcessorChain>
 

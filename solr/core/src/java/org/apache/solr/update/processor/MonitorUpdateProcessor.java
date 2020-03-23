@@ -25,7 +25,6 @@ import org.apache.lucene.monitor.MatchingQueries;
 import org.apache.lucene.monitor.Monitor;
 import org.apache.lucene.monitor.QueryMatch;
 import org.apache.solr.cloud.CloudDescriptor;
-import org.apache.solr.common.SolrException;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
@@ -49,18 +48,19 @@ public class MonitorUpdateProcessor extends UpdateRequestProcessor {
   @Override
   public void processAdd(AddUpdateCommand cmd) throws IOException {
     // TODO: how to handle exceptions
-    try {
-      // TODO: which MatcherFactory to use?
-      // TODO: We must set forInPlaceUpdate=True to avoid copy fields, figure out why
-      Monitor monitor = MonitorUpdateProcessorFactory.getMonitor();
-      MatchingQueries<QueryMatch> matches = monitor.match(DocumentBuilder.toDocument(cmd.getSolrInputDocument(), req.getSchema()), QueryMatch.SIMPLE_MATCHER);
-      List<String> matchedIds = new ArrayList<>();
-      matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));
-      this.rsp.add("match_count", matches.getMatchCount());
-      this.rsp.add("matches", matchedIds);
-      super.processAdd(cmd);
-    } catch (/*KeeperException | InterruptedException | JoseException |*/ Exception ex) {
-      throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
-    }
+    // try {
+    // TODO: which MatcherFactory to use?
+    // TODO: We must set forInPlaceUpdate=True to avoid copy fields, figure out why
+    Monitor monitor = MonitorUpdateProcessorFactory.getMonitor();
+    // MatchingQueries<QueryMatch> matches = monitor.match(DocumentBuilder.toDocument(cmd.getSolrInputDocument(), req.getSchema()), QueryMatch.SIMPLE_MATCHER);
+    MatchingQueries<QueryMatch> matches = monitor.match(cmd.getLuceneDocument(), QueryMatch.SIMPLE_MATCHER);
+    List<String> matchedIds = new ArrayList<>();
+    matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));
+    this.rsp.add("match_count", matches.getMatchCount());
+    this.rsp.add("matches", matchedIds);
+    super.processAdd(cmd);
+    // } catch (/*KeeperException | InterruptedException | JoseException |*/ Exception ex) {
+    //   throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
+    // }
   }
 }

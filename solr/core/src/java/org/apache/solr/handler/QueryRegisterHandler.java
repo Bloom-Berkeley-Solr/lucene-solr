@@ -18,7 +18,9 @@
 package org.apache.solr.handler;
 
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
@@ -27,16 +29,23 @@ import org.apache.lucene.search.Query;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.core.CoreContainer;
+import org.apache.solr.core.SolrCore;
+import org.apache.solr.handler.component.QueryComponent;
+import org.apache.solr.handler.component.ResponseBuilder;
+import org.apache.solr.handler.component.SearchComponent;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.processor.MonitorUpdateProcessorFactory;
+import org.apache.solr.util.plugin.SolrCoreAware;
 import org.jose4j.json.JsonUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class QueryRegisterHandler extends RequestHandlerBase {
+public class QueryRegisterHandler extends RequestHandlerBase implements SolrCoreAware {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+  private SolrCore core;
 
   static Query parse(String query) {
     try {
@@ -52,10 +61,16 @@ public class QueryRegisterHandler extends RequestHandlerBase {
     CoreContainer cc = req.getCore().getCoreContainer();
     SolrZkClient client = cc.getZkController().getZkClient();
     SolrParams params = req.getParams();
-    String q = params.get("q");
+    // String q = params.get("q");
     String queryId = params.get("id");
     // FIXME: convert to Lucene Query
 
+    // TODO: just for test
+    List<SearchComponent> components = new ArrayList<>();
+    components.add(core.getSearchComponent("query"));
+    ResponseBuilder rb = new ResponseBuilder(req, rsp, components);
+    for (SearchComponent c : components) c.prepare(rb);
+    Query query = rb.getQuery();
     // String collection = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
 
@@ -74,9 +89,9 @@ public class QueryRegisterHandler extends RequestHandlerBase {
       else
         jsonStr = new String(bytesRead);
       Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
-      // current behavior: overwrite, since Zookeeper guarantees atomic writes
+      // current behavior: overwrite
       LinkedHashMap<String, Object> queryMap = new LinkedHashMap<>(jsonMap);
-      queryMap.put(queryId, q);
+      queryMap.put(queryId, query.toString());
       client.setData(path, JsonUtil.toJson(queryMap).getBytes(), true);
     }
   }
@@ -85,5 +100,10 @@ public class QueryRegisterHandler extends RequestHandlerBase {
   @Override
   public String getDescription() {
     return null;
+  }
+
+  @Override
+  public void inform(SolrCore core) {
+    this.core = core;
   }
 }
