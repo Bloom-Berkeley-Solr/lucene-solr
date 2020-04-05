@@ -17,12 +17,16 @@
 
 package org.apache.solr.handler;
 
+import java.io.ByteArrayOutputStream;
+import java.io.ObjectOutputStream;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang3.SerializationUtils;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
@@ -30,7 +34,6 @@ import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.SolrCore;
-import org.apache.solr.handler.component.QueryComponent;
 import org.apache.solr.handler.component.ResponseBuilder;
 import org.apache.solr.handler.component.SearchComponent;
 import org.apache.solr.request.SolrQueryRequest;
@@ -45,12 +48,20 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+  public static final String PARSER_DEFAULT_FIELD_NAME = "defaultField";
+  public static final String PARAM_QUERY_ID_NAME = "id";
+  public static final String PARAM_COLLECTION_NAMES = "collections";
+  public static final String ZK_KEY_SOLR_PARAMS = "params";
+  // private static final String PARAM_CONFIG_NAME = "config";
+  // private static final String ZK_KEY_CONFIG_OBJECT = "config";
+  public static final String ZK_KEY_QUERY_STRING = "q";
+
   private SolrCore core;
 
   static Query parse(String query) {
     try {
       StandardQueryParser parser = new StandardQueryParser();
-      return parser.parse(query, "defaultField");
+      return parser.parse(query, PARSER_DEFAULT_FIELD_NAME);
     } catch (QueryNodeException e) {
       throw new IllegalArgumentException(e);
     }
@@ -62,10 +73,9 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
     SolrZkClient client = cc.getZkController().getZkClient();
     SolrParams params = req.getParams();
     // String q = params.get("q");
-    String queryId = params.get("id");
+    String queryId = params.get(PARAM_QUERY_ID_NAME);
     // FIXME: convert to Lucene Query
-
-    // TODO: just for test
+    // TODO: just for test, use query component to parse query string
     List<SearchComponent> components = new ArrayList<>();
     components.add(core.getSearchComponent("query"));
     ResponseBuilder rb = new ResponseBuilder(req, rsp, components);
@@ -75,7 +85,10 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
 
 
-    // FIXME: concurrent modification? do we need a lock to protect it
+    // serialize SolrParams
+    // TODO: java serialization is unreadable -> can we serialize to json representation
+    byte[] paramBytes = SerializationUtils.serialize(params);
+
     // "a single handler instance is reused for all relevant queries"
     synchronized (this) {
       if (!client.exists(path, true)) {
@@ -88,11 +101,14 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
         jsonStr = "{}";
       else
         jsonStr = new String(bytesRead);
-      Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
+      Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
       // current behavior: overwrite
-      LinkedHashMap<String, Object> queryMap = new LinkedHashMap<>(jsonMap);
-      queryMap.put(queryId, query.toString());
-      client.setData(path, JsonUtil.toJson(queryMap).getBytes(), true);
+      Map<String, Object> queryNodeMap = new HashMap<String, Object>();
+      LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
+      queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
+      queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramBytes);
+      newJsonMap.put(queryId, queryNodeMap);
+      client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
     }
   }
 

@@ -19,22 +19,29 @@ package org.apache.solr.update.processor;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.commons.lang3.SerializationUtils;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.monitor.Monitor;
 import org.apache.lucene.monitor.MonitorQuery;
 import org.apache.lucene.monitor.Presearcher;
-import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
-import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
+import org.apache.lucene.search.FuzzyTermsEnum;
+import org.apache.lucene.search.PointRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.OnReconnect;
 import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.handler.QueryRegisterHandler;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.request.SolrQueryRequestBase;
 import org.apache.solr.response.SolrQueryResponse;
+import org.apache.solr.search.QParser;
+import org.apache.solr.search.QParserPlugin;
+import org.apache.solr.search.QueryParsing;
+import org.apache.solr.search.SyntaxError;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
@@ -45,17 +52,29 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
   private class MonitorWatcher implements Watcher {
 
+    SolrQueryRequest req;
+
+    MonitorWatcher(SolrQueryRequest req) {
+      this.req = req;
+    }
+
     @Override
     public void process(WatchedEvent watchedEvent) {
-      syncQueries();
+      syncQueries(req);
     }
   }
 
   private class ZkReconnectListener implements OnReconnect {
 
+    SolrQueryRequest req;
+
+    ZkReconnectListener(SolrQueryRequest req) {
+      this.req = req;
+    }
+
     @Override
-    public void command() throws KeeperException.SessionExpiredException {
-      syncQueries();
+    public void command() {
+      syncQueries(req);
     }
   }
 
@@ -73,13 +92,22 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
 
   // TODO: which parser to use
-  public static Query parse(String query) {
-    StandardQueryParser parser = new StandardQueryParser();
-    // QueryParser parser = new QueryParser(parserDefaultField, new StandardAnalyzer());
+
+  /**
+   * parsing function used to parse queries read from zookeeper
+   * Set configs to support {@link PointRangeQuery}: int, long, float, double
+   *
+   * @param queryString the input query string
+   * @param req         the corresponding reconstructed SolrQueryRequest (from params)
+   * @return the parsed query object
+   */
+  public static Query parse(String queryString, SolrQueryRequest req) {
     try {
-      return parser.parse(query, parserDefaultField);
-    } catch (QueryNodeException e) {
-      throw new IllegalArgumentException(e);
+      String deyType = req.getParams().get(QueryParsing.DEFTYPE, QParserPlugin.DEFAULT_QTYPE);
+      QParser parser = QParser.getParser(queryString, deyType, req);
+      return parser.getQuery();
+    } catch (SyntaxError | FuzzyTermsEnum.FuzzyTermsException e) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, e);
     }
   }
 
@@ -98,19 +126,19 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       singletonMonitor = new Monitor(new StandardAnalyzer(), Presearcher.NO_FILTERING);
       ZkController zc = req.getCore().getCoreContainer().getZkController();
       this.client = zc.getZkClient();
-      zc.addOnReconnectListener(new ZkReconnectListener());
-      syncQueries();
+      zc.addOnReconnectListener(new ZkReconnectListener(req));
+      syncQueries(req);
     } catch (IOException ex) {
       throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
     }
   }
 
   // FIXME: is it thread-safe?
-  synchronized void syncQueries() {
+  synchronized void syncQueries(SolrQueryRequest req) {
     try {
       // TODO: watcher x 2? may be redundant
-      if (client.exists(zkQueryPath, new MonitorWatcher(), true) == null) return;
-      byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(), null, true);
+      if (client.exists(zkQueryPath, new MonitorWatcher(req), true) == null) return;
+      byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(req), null, true);
       String jsonStr;
       if (bytesRead == null)
         jsonStr = "{}";
@@ -124,12 +152,24 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       ArrayList<MonitorQuery> queries = new ArrayList<MonitorQuery>();
 
       for (String queryId : jsonMap.keySet()) {
+        // read and deserialize values from Zk
         Object value = jsonMap.get(queryId);
         // TODO: maybe support other data types than String, e.g. boolean, int, float, ...
-        if (!(value instanceof String))
+        if (!(value instanceof Map))
           throw new SolrException(SolrException.ErrorCode.UNKNOWN, "Only support String as values in monitor queries json configuration");
-        String query = (String) value;
-        queries.add(new MonitorQuery(queryId, parse(query)));
+        Map<String, Object> queryNodeMap = (Map) value;
+
+        String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
+        byte[] paramBytes = (byte[]) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
+
+        // deserialize params
+        SolrParams params = SerializationUtils.deserialize(paramBytes);
+        // String query = (String) value;
+
+        // reconstruct SolrQueryRequest
+        SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
+        };
+        queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
       }
 
       monitor.register(queries);
