@@ -17,23 +17,24 @@
 
 package org.apache.solr.update.processor;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Map;
 
-import org.apache.commons.lang3.SerializationUtils;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.monitor.Monitor;
 import org.apache.lucene.monitor.MonitorQuery;
 import org.apache.lucene.monitor.Presearcher;
 import org.apache.lucene.search.FuzzyTermsEnum;
-import org.apache.lucene.search.PointRangeQuery;
 import org.apache.lucene.search.Query;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.OnReconnect;
 import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.util.JavaBinCodec;
 import org.apache.solr.handler.QueryRegisterHandler;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequestBase;
@@ -94,9 +95,6 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
   // TODO: which parser to use
 
   /**
-   * parsing function used to parse queries read from zookeeper
-   * Set configs to support {@link PointRangeQuery}: int, long, float, double
-   *
    * @param queryString the input query string
    * @param req         the corresponding reconstructed SolrQueryRequest (from params)
    * @return the parsed query object
@@ -159,12 +157,21 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
           throw new SolrException(SolrException.ErrorCode.UNKNOWN, "Only support String as values in monitor queries json configuration");
         Map<String, Object> queryNodeMap = (Map) value;
 
+        // read from zk
         String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
-        byte[] paramBytes = (byte[]) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
+        Object paramsObj = queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
 
         // deserialize params
-        SolrParams params = SerializationUtils.deserialize(paramBytes);
-        // String query = (String) value;
+        ArrayList<Long> longList;
+        if (paramsObj instanceof ArrayList)
+          longList = (ArrayList<Long>) paramsObj;
+        else
+          throw new SolrException(SolrException.ErrorCode.UNKNOWN, "params should be a list of Long");
+        byte[] paramBytes = new byte[longList.size()];
+        for (int i = 0; i < longList.size(); i++) {
+          paramBytes[i] = longList.get(i).byteValue();
+        }
+        SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
 
         // reconstruct SolrQueryRequest
         SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
@@ -175,6 +182,12 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       monitor.register(queries);
     } catch (KeeperException | InterruptedException | JoseException | IOException ex) {
       throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
+    }
+  }
+
+  private static Object getObject(byte[] bytes) throws IOException {
+    try (JavaBinCodec jbc = new JavaBinCodec()) {
+      return jbc.unmarshal(new ByteArrayInputStream(bytes));
     }
   }
 }
