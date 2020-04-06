@@ -32,6 +32,7 @@ import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.util.Base64;
 import org.apache.solr.common.util.JavaBinCodec;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.SolrCore;
@@ -88,8 +89,8 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
 
     // serialize SolrParams
     // TODO: byte array is unreadable -> can we serialize to json representation
-    byte[] paramBytes;
-    paramBytes = getBytes(params);
+    byte[] paramBytes = getBytes(params);
+    String paramString = Base64.byteArrayToBase64(paramBytes);
 
     // "a single handler instance is reused for all relevant queries"
     synchronized (this) {
@@ -108,7 +109,7 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
       Map<String, Object> queryNodeMap = new HashMap<String, Object>();
       LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
       queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
-      queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramBytes);
+      queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
       newJsonMap.put(queryId, queryNodeMap);
       client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
     }

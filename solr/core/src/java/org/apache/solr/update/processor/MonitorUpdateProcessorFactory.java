@@ -34,6 +34,7 @@ import org.apache.solr.common.cloud.OnReconnect;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.util.Base64;
 import org.apache.solr.common.util.JavaBinCodec;
 import org.apache.solr.handler.QueryRegisterHandler;
 import org.apache.solr.request.SolrQueryRequest;
@@ -159,18 +160,10 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
         // read from zk
         String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
-        Object paramsObj = queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
+        String paramsStr = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
 
         // deserialize params
-        ArrayList<Long> longList;
-        if (paramsObj instanceof ArrayList)
-          longList = (ArrayList<Long>) paramsObj;
-        else
-          throw new SolrException(SolrException.ErrorCode.UNKNOWN, "params should be a list of Long");
-        byte[] paramBytes = new byte[longList.size()];
-        for (int i = 0; i < longList.size(); i++) {
-          paramBytes[i] = longList.get(i).byteValue();
-        }
+        byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
         SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
 
         // reconstruct SolrQueryRequest
