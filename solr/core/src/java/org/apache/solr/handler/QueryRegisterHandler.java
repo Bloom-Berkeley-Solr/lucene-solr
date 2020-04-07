@@ -26,7 +26,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.commons.lang3.SerializationUtils;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
@@ -57,6 +56,7 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
   // private static final String PARAM_CONFIG_NAME = "config";
   // private static final String ZK_KEY_CONFIG_OBJECT = "config";
   public static final String ZK_KEY_QUERY_STRING = "q";
+  public static final String ZK_KEY_VERSION = "version";
 
   private SolrCore core;
 
@@ -98,18 +98,25 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
         client.makePath(path, true);
       }
 
+      // read & prepare data
       byte[] bytesRead = client.getData(path, null, null, true);
       String jsonStr;
       if (bytesRead == null)
         jsonStr = "{}";
       else
         jsonStr = new String(bytesRead);
+      long version = 0;
       Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
-      // current behavior: overwrite
+      if (oldJsonMap.containsKey(queryId)) {
+        version = (Long) ((Map) oldJsonMap.get(queryId)).get(ZK_KEY_VERSION) + 1;
+      }
+
+      // write data
       Map<String, Object> queryNodeMap = new HashMap<String, Object>();
       LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
       queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
       queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
+      queryNodeMap.put(ZK_KEY_VERSION, version);
       newJsonMap.put(queryId, queryNodeMap);
       client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
     }

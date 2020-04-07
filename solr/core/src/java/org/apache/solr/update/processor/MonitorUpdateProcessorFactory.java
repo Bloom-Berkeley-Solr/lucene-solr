@@ -20,6 +20,7 @@ package org.apache.solr.update.processor;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -86,6 +87,9 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
   private static Monitor singletonMonitor = null;
 
+  // use this hash map to track all local queries, can be used to check the difference during synchronization
+  private HashMap<String, Long> queryVersion = new HashMap<>();
+
   private SolrZkClient client;
 
   public static Monitor getMonitor() {
@@ -146,11 +150,10 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
 
       Monitor monitor = getMonitor();
-      // TODO: clear and add is inefficient, consider use a smarter method
-      monitor.clear();
-      ArrayList<MonitorQuery> queries = new ArrayList<MonitorQuery>();
+      ArrayList<MonitorQuery> queries = new ArrayList<>();
 
       for (String queryId : jsonMap.keySet()) {
+
         // read and deserialize values from Zk
         Object value = jsonMap.get(queryId);
         // TODO: maybe support other data types than String, e.g. boolean, int, float, ...
@@ -159,6 +162,11 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
         Map<String, Object> queryNodeMap = (Map) value;
 
         // read from zk
+        Long version = (Long) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_VERSION);
+        // check if this query already exist in local monitor (with latest version)
+        if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
+        queryVersion.put(queryId, version);
+
         String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
         String paramsStr = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
 
