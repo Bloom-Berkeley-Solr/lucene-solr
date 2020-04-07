@@ -19,7 +19,6 @@ package org.apache.solr.handler;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -41,20 +40,16 @@ import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.processor.MonitorUpdateProcessorFactory;
 import org.apache.solr.util.plugin.SolrCoreAware;
+import org.apache.zookeeper.KeeperException;
 import org.jose4j.json.JsonUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jose4j.lang.JoseException;
 
 public class QueryRegisterHandler extends RequestHandlerBase implements SolrCoreAware {
-
-  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-
+  
   public static final String PARSER_DEFAULT_FIELD_NAME = "defaultField";
   public static final String PARAM_QUERY_ID_NAME = "id";
   public static final String PARAM_COLLECTION_NAMES = "collections";
   public static final String ZK_KEY_SOLR_PARAMS = "params";
-  // private static final String PARAM_CONFIG_NAME = "config";
-  // private static final String ZK_KEY_CONFIG_OBJECT = "config";
   public static final String ZK_KEY_QUERY_STRING = "q";
   public static final String ZK_KEY_VERSION = "version";
 
@@ -74,52 +69,62 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
     CoreContainer cc = req.getCore().getCoreContainer();
     SolrZkClient client = cc.getZkController().getZkClient();
     SolrParams params = req.getParams();
-    // String q = params.get("q");
     String queryId = params.get(PARAM_QUERY_ID_NAME);
-    // FIXME: convert to Lucene Query
-    // TODO: just for test, use query component to parse query string
+
+    // use query component to parse query string
     List<SearchComponent> components = new ArrayList<>();
     components.add(core.getSearchComponent("query"));
     ResponseBuilder rb = new ResponseBuilder(req, rsp, components);
     for (SearchComponent c : components) c.prepare(rb);
     Query query = rb.getQuery();
-    // String collection = req.getCore().getCoreDescriptor().getCloudDescriptor().getCollectionName();
-    String path = MonitorUpdateProcessorFactory.zkQueryPath;
-
 
     // serialize SolrParams
-    // TODO: byte array is unreadable -> can we serialize to json representation
     byte[] paramBytes = getBytes(params);
     String paramString = Base64.byteArrayToBase64(paramBytes);
 
-    // "a single handler instance is reused for all relevant queries"
-    synchronized (this) {
-      if (!client.exists(path, true)) {
-        client.makePath(path, true);
-      }
+    registerQueryToZk(client, queryId, query, paramString);
+  }
 
-      // read & prepare data
-      byte[] bytesRead = client.getData(path, null, null, true);
-      String jsonStr;
-      if (bytesRead == null)
-        jsonStr = "{}";
-      else
-        jsonStr = new String(bytesRead);
-      long version = 0;
-      Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
-      if (oldJsonMap.containsKey(queryId)) {
-        version = (Long) ((Map) oldJsonMap.get(queryId)).get(ZK_KEY_VERSION) + 1;
-      }
-
-      // write data
-      Map<String, Object> queryNodeMap = new HashMap<String, Object>();
-      LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
-      queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
-      queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
-      queryNodeMap.put(ZK_KEY_VERSION, version);
-      newJsonMap.put(queryId, queryNodeMap);
-      client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
+  /**
+   * Write the query to Zookeeper.
+   * All queries are stored in a single node, so read -> modify -> write.
+   * "a single handler instance is reused for all relevant queries" -> synchronized method
+   *
+   * @param client      Zookeeper client
+   * @param queryId     The user specified id of query
+   * @param query       Parsed Lucene {@link Query} object
+   * @param paramString The string(base64) representation of the serialized query
+   * @throws KeeperException      If error occurred related to Zookeeper
+   * @throws InterruptedException
+   * @throws JoseException        If error occurred in JsonUtil
+   */
+  synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString) throws KeeperException, InterruptedException, JoseException {
+    String path = MonitorUpdateProcessorFactory.zkQueryPath;
+    if (!client.exists(path, true)) {
+      client.makePath(path, true);
     }
+
+    // read & prepare data
+    byte[] bytesRead = client.getData(path, null, null, true);
+    String jsonStr;
+    if (bytesRead == null)
+      jsonStr = "{}";
+    else
+      jsonStr = new String(bytesRead);
+    long version = 0;
+    Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
+    if (oldJsonMap.containsKey(queryId)) {
+      version = (Long) ((Map) oldJsonMap.get(queryId)).get(ZK_KEY_VERSION) + 1;
+    }
+
+    // write data
+    Map<String, Object> queryNodeMap = new HashMap<String, Object>();
+    LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
+    queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
+    queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
+    queryNodeMap.put(ZK_KEY_VERSION, version);
+    newJsonMap.put(queryId, queryNodeMap);
+    client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
   }
 
 
@@ -133,6 +138,13 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
     this.core = core;
   }
 
+  /**
+   * Serialize an object to a byte array using {@link JavaBinCodec}
+   *
+   * @param o The object to serialize
+   * @return A byte array
+   * @throws IOException
+   */
   private static byte[] getBytes(Object o) throws IOException {
     try (JavaBinCodec javabin = new JavaBinCodec(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
       javabin.marshal(o, baos);

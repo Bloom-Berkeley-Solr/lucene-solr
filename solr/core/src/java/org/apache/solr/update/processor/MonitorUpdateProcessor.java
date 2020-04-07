@@ -24,32 +24,21 @@ import java.util.List;
 import org.apache.lucene.monitor.MatchingQueries;
 import org.apache.lucene.monitor.Monitor;
 import org.apache.lucene.monitor.QueryMatch;
-import org.apache.solr.cloud.CloudDescriptor;
-import org.apache.solr.core.CoreContainer;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.AddUpdateCommand;
-import org.apache.solr.update.DocumentBuilder;
 
 public class MonitorUpdateProcessor extends UpdateRequestProcessor {
 
-  private final CloudDescriptor cloudDesc;
-  private final SolrQueryRequest req;
   private final SolrQueryResponse rsp;
 
   public MonitorUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {
     super(next);
-    CoreContainer cc = req.getCore().getCoreContainer();
-    cloudDesc = req.getCore().getCoreDescriptor().getCloudDescriptor();
-    this.req = req;
     this.rsp = rsp;
   }
 
   @Override
   public void processAdd(AddUpdateCommand cmd) throws IOException {
-    // TODO: how to handle exceptions
-    // TODO: which MatcherFactory to use?
-    // TODO: We must set forInPlaceUpdate=True to avoid copy fields, figure out why
     Monitor monitor = MonitorUpdateProcessorFactory.getMonitor();
     MatchingQueries<QueryMatch> matches = monitor.match(cmd.getLuceneDocument(), QueryMatch.SIMPLE_MATCHER);
     List<String> matchedIds = new ArrayList<>();

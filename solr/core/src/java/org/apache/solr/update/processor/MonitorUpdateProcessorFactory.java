@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -81,10 +82,6 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     }
   }
 
-  public static final String zkQueryPath = "/monitor.json";
-  // public static final String zkParentPath = "/monitor";
-  public static final String parserDefaultField = "defaultField";
-
   private static Monitor singletonMonitor = null;
 
   // use this hash map to track all local queries, can be used to check the difference during synchronization
@@ -92,17 +89,16 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
   private SolrZkClient client;
 
+  public static final String zkQueryPath = "/monitor.json";
+
   public static Monitor getMonitor() {
     return singletonMonitor;
   }
 
-
-  // TODO: which parser to use
-
   /**
-   * @param queryString the input query string
-   * @param req         the corresponding reconstructed SolrQueryRequest (from params)
-   * @return the parsed query object
+   * @param queryString The input query string
+   * @param req         The corresponding reconstructed SolrQueryRequest (from params)
+   * @return The parsed Lucene Query object
    */
   public static Query parse(String queryString, SolrQueryRequest req) {
     try {
@@ -122,10 +118,13 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     return new MonitorUpdateProcessor(req, rsp, next);
   }
 
+  /**
+   * Create a static monitor instance and initialize
+   *
+   * @param req The request which is used to get Zookeeper client
+   */
   void createMonitorInstance(SolrQueryRequest req) {
-    // TODO: does it need to be thread safe?
     try {
-      // TODO: use which analyzer and presearcher?
       singletonMonitor = new Monitor(new StandardAnalyzer(), Presearcher.NO_FILTERING);
       ZkController zc = req.getCore().getCoreContainer().getZkController();
       this.client = zc.getZkClient();
@@ -136,56 +135,82 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     }
   }
 
-  // FIXME: is it thread-safe?
+  /**
+   * Synchronize queries with Zookeeper.
+   *
+   * @param req The request is used to get the Solr Core to reconstruct the query request, which is used for parsing
+   */
   synchronized void syncQueries(SolrQueryRequest req) {
     try {
-      // TODO: watcher x 2? may be redundant
       if (client.exists(zkQueryPath, new MonitorWatcher(req), true) == null) return;
       byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(req), null, true);
-      String jsonStr;
-      if (bytesRead == null)
-        jsonStr = "{}";
-      else
+      String jsonStr = "{}";
+      if (bytesRead != null) {
         jsonStr = new String(bytesRead);
+      }
       Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
 
       Monitor monitor = getMonitor();
-      ArrayList<MonitorQuery> queries = new ArrayList<>();
 
-      for (String queryId : jsonMap.keySet()) {
+      // find queries that need to be updated
+      ArrayList<MonitorQuery> queriesToAdd = getNewQueries(req, jsonMap);
+      List<String> queryIdsToDelete = new ArrayList<>();
+      queriesToAdd.forEach(query -> queryIdsToDelete.add(query.getId()));
 
-        // read and deserialize values from Zk
-        Object value = jsonMap.get(queryId);
-        // TODO: maybe support other data types than String, e.g. boolean, int, float, ...
-        if (!(value instanceof Map))
-          throw new SolrException(SolrException.ErrorCode.UNKNOWN, "Only support String as values in monitor queries json configuration");
-        Map<String, Object> queryNodeMap = (Map) value;
-
-        // read from zk
-        Long version = (Long) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_VERSION);
-        // check if this query already exist in local monitor (with latest version)
-        if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
-        queryVersion.put(queryId, version);
-
-        String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
-        String paramsStr = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
-
-        // deserialize params
-        byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
-        SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
-
-        // reconstruct SolrQueryRequest
-        SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
-        };
-        queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
-      }
-
-      monitor.register(queries);
+      // update queries
+      monitor.deleteById(queryIdsToDelete);
+      monitor.register(queriesToAdd);
     } catch (KeeperException | InterruptedException | JoseException | IOException ex) {
       throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
     }
   }
 
+  /**
+   * Find the newly created or modified queries. They should be registered to the monitor.
+   *
+   * @param req        The request is used to get the Solr Core to reconstruct the query request, which is used for parsing
+   * @param allQueries The map containing all queries, read from Zookeeper
+   * @return A list of {@link MonitorQuery} that should be updated to local monitor
+   * @throws IOException
+   */
+  private ArrayList<MonitorQuery> getNewQueries(SolrQueryRequest req, Map<String, Object> allQueries) throws IOException {
+    ArrayList<MonitorQuery> queries = new ArrayList<>();
+
+    for (String queryId : allQueries.keySet()) {
+
+      // read and deserialize values from Zk
+      Object value = allQueries.get(queryId);
+      if (!(value instanceof Map))
+        throw new SolrException(SolrException.ErrorCode.UNKNOWN, "Only support String as values in monitor queries json configuration");
+      Map<String, Object> queryNodeMap = (Map) value;
+
+      // check if this query already exist in local monitor (with latest version)
+      Long version = (Long) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_VERSION);
+      if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
+      queryVersion.put(queryId, version);
+
+      String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
+      String paramsStr = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
+
+      // deserialize params
+      byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
+      SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
+
+      // reconstruct SolrQueryRequest
+      SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
+      };
+      queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
+    }
+    return queries;
+  }
+
+  /**
+   * Deserialize from a byte array using {@link JavaBinCodec}
+   *
+   * @param bytes Raw byte array
+   * @return Deserialized object
+   * @throws IOException
+   */
   private static Object getObject(byte[] bytes) throws IOException {
     try (JavaBinCodec jbc = new JavaBinCodec()) {
       return jbc.unmarshal(new ByteArrayInputStream(bytes));
