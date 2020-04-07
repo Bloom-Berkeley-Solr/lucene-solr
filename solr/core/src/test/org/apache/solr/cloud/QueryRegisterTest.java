@@ -76,11 +76,10 @@ public class QueryRegisterTest extends SolrCloudTestCase {
     byte[] bytesRead = zkClient.getData(zkPath, null, null, true);
     Map<String, Object> m = JsonUtil.parseJson(new String(bytesRead, StandardCharsets.UTF_8));
     assertTrue(m.keySet().contains("1"));
-    assertEquals((String) m.get("1"), "name:peter");
+    assertTrue(((Map<String, Object>)m.get("1")).keySet().contains("q"));
+    assertEquals(((Map<String, Object>)m.get("1")).get("q"), "name:peter");
 
     solr.close();
-
-
   }
 
   @After
