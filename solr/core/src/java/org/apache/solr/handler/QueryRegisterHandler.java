@@ -19,6 +19,7 @@ package org.apache.solr.handler;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -45,7 +46,7 @@ import org.jose4j.json.JsonUtil;
 import org.jose4j.lang.JoseException;
 
 public class QueryRegisterHandler extends RequestHandlerBase implements SolrCoreAware {
-  
+
   public static final String PARSER_DEFAULT_FIELD_NAME = "defaultField";
   public static final String PARAM_QUERY_ID_NAME = "id";
   public static final String PARAM_COLLECTION_NAMES = "collections";
@@ -106,11 +107,9 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
 
     // read & prepare data
     byte[] bytesRead = client.getData(path, null, null, true);
-    String jsonStr;
-    if (bytesRead == null)
-      jsonStr = "{}";
-    else
-      jsonStr = new String(bytesRead);
+    String jsonStr = "{}";
+    if (bytesRead != null)
+      jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
     long version = 0;
     Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
     if (oldJsonMap.containsKey(queryId)) {
@@ -124,7 +123,7 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
     queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
     queryNodeMap.put(ZK_KEY_VERSION, version);
     newJsonMap.put(queryId, queryNodeMap);
-    client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(), true);
+    client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(StandardCharsets.UTF_8), true);
   }
 
 

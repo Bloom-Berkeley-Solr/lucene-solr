@@ -19,6 +19,7 @@ package org.apache.solr.update.processor;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -146,7 +147,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(req), null, true);
       String jsonStr = "{}";
       if (bytesRead != null) {
-        jsonStr = new String(bytesRead);
+        jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
       }
       Map<String, Object> jsonMap = JsonUtil.parseJson(jsonStr);
 

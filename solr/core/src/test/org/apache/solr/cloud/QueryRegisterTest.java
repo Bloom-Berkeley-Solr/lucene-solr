@@ -17,9 +17,9 @@
 
 package org.apache.solr.cloud;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
-import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.impl.NoOpResponseParser;
@@ -32,58 +32,57 @@ import org.apache.solr.update.processor.MonitorUpdateProcessorFactory;
 import org.jose4j.json.JsonUtil;
 import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.Assert.*;
 
-public class QueryRegisterTest extends SolrCloudTestCase{
+public class QueryRegisterTest extends SolrCloudTestCase {
 
   SolrZkClient zkClient;
+
   @BeforeClass
   public static void setupCluster() throws Exception {
     System.setProperty("shareSchema", "true");  // see testSharedSchema
 
     configureCluster(1) // some tests here assume 1 node
-        .addConfig("conf1",configset("cloud-minimal-query"))
+        .addConfig("conf1", configset("cloud-minimal-query"))
         .configure();
   }
 
   @Test
-  public void testQueryRegister() throws Exception{
-    String zkPath= MonitorUpdateProcessorFactory.zkQueryPath;
-    zkClient=zkClient();
-    zkClient.makePath(zkPath,false);
-    assertNull(zkClient.getData(zkPath,null,null,false));
-    String baseUrl=cluster.getJettySolrRunner(0).getBaseUrl().toString();
+  public void testQueryRegister() throws Exception {
+    String zkPath = MonitorUpdateProcessorFactory.zkQueryPath;
+    zkClient = zkClient();
+    zkClient.makePath(zkPath, false);
+    assertNull(zkClient.getData(zkPath, null, null, false));
+    String baseUrl = cluster.getJettySolrRunner(0).getBaseUrl().toString();
 
     HttpSolrClient solr = new HttpSolrClient.Builder(baseUrl).build();
 
-    ModifiableSolrParams params=new ModifiableSolrParams();
-    params.set("id",1);
-    params.set("q","name:peter");
-    GenericSolrRequest request=new GenericSolrRequest(SolrRequest.METHOD.POST,"/register",params);
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.set("id", 1);
+    params.set("q", "name:peter");
+    GenericSolrRequest request = new GenericSolrRequest(SolrRequest.METHOD.POST, "/register", params);
     request.setResponseParser(new NoOpResponseParser("json"));
     CollectionAdminRequest.createCollection("test_query_register", "conf1", 1, 1)
         .processAndWait(solr, DEFAULT_TIMEOUT);
-    NamedList<Object> nl=solr.request(request,"test_query_register");
-    String s1=(String)nl.get("response");
-    Map<String,Object> map=JsonUtil.parseJson(s1);
-    Map<String,Long> resp=(Map)map.get("responseHeader");
+    NamedList<Object> nl = solr.request(request, "test_query_register");
+    String s1 = (String) nl.get("response");
+    Map<String, Object> map = JsonUtil.parseJson(s1);
+    Map<String, Long> resp = (Map) map.get("responseHeader");
 
 
-
-    Assert.assertEquals((Long)resp.get("status"),(Long)0L);
+    Assert.assertEquals((Long) resp.get("status"), (Long) 0L);
 
     byte[] bytesRead = zkClient.getData(zkPath, null, null, true);
-    Map<String,Object> m=JsonUtil.parseJson(new String(bytesRead));
+    Map<String, Object> m = JsonUtil.parseJson(new String(bytesRead, StandardCharsets.UTF_8));
     assertTrue(m.keySet().contains("1"));
-    assertEquals((String)m.get("1"),"name:peter");
+    assertEquals((String) m.get("1"), "name:peter");
 
     solr.close();
 
 
   }
+
   @After
   public void doAfter() throws Exception {
     cluster.deleteAllCollections();
