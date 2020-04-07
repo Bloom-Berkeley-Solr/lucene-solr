@@ -172,7 +172,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
    * @param req        The request is used to get the Solr Core to reconstruct the query request, which is used for parsing
    * @param allQueries The map containing all queries, read from Zookeeper
    * @return A list of {@link MonitorQuery} that should be updated to local monitor
-   * @throws IOException
+   * @throws IOException If an IO exception occurs
    */
   private ArrayList<MonitorQuery> getNewQueries(SolrQueryRequest req, Map<String, Object> allQueries) throws IOException {
     ArrayList<MonitorQuery> queries = new ArrayList<>();
@@ -210,7 +210,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
    *
    * @param bytes Raw byte array
    * @return Deserialized object
-   * @throws IOException
+   * @throws IOException If an IO exception occurs
    */
   private static Object getObject(byte[] bytes) throws IOException {
     try (JavaBinCodec jbc = new JavaBinCodec()) {

@@ -95,9 +95,9 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
    * @param queryId     The user specified id of query
    * @param query       Parsed Lucene {@link Query} object
    * @param paramString The string(base64) representation of the serialized query
-   * @throws KeeperException      If error occurred related to Zookeeper
-   * @throws InterruptedException
-   * @throws JoseException        If error occurred in JsonUtil
+   * @throws KeeperException      If an exception occurs related to Zookeeper
+   * @throws InterruptedException If thread is interrupted
+   * @throws JoseException        If an exception occurs in JsonUtil
    */
   synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString) throws KeeperException, InterruptedException, JoseException {
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
@@ -142,7 +142,7 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
    *
    * @param o The object to serialize
    * @return A byte array
-   * @throws IOException
+   * @throws IOException If IO fails
    */
   private static byte[] getBytes(Object o) throws IOException {
     try (JavaBinCodec javabin = new JavaBinCodec(); ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
