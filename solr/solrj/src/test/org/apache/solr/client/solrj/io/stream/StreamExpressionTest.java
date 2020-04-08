@@ -19,8 +19,7 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
-import java.net.http.HttpClient;
-import java.net.http.HttpResponse;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -59,6 +58,7 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.core.CoreDescriptor;
 import org.apache.solr.core.SolrResourceLoader;
+import org.eclipse.jetty.server.Server;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -67,10 +67,8 @@ import org.mockito.Mockito;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 @Slow
 @SolrTestCaseJ4.SuppressSSL
@@ -2247,17 +2245,14 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         // Index a few more documents
         new UpdateRequest()
           .add(id, "10", "a_s", "hello", "a_i", "13", "a_f", "11")
-          .add(id, "11", "a_s", "hello", "a_i", "14", "a_f", "12")
           .add(id, "12", "a_s", "helloWorld", "a_i", "15", "a_f", "13")
           .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
 
         tuples = getTuples(astream);
 
-        assertEquals(2, tuples.size());
+        assertEquals(1, tuples.size());
         assertEquals("10", tuples.get(0).get("id"));
-        assertEquals("11", tuples.get(1).get("id"));
         verify(astream, times(1)).alert(tuples.get(0));
-        verify(astream, times(1)).alert(tuples.get(1));
       } finally {
         astream.close();
       }
@@ -2277,31 +2272,24 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         );
         dstream = (DaemonStream) factory.constructStream(expression);
         dstream.setStreamContext(context);
-//
-//        HttpClient httpClient = Mockito.mock(HttpClient.class);
-//        HttpResponse httpResponse = Mockito.mock(HttpResponse.class);
-//        when(httpClient.execute(Mockito.any())).thenReturn(httpResponse);
 
-//        doNothing().when(mockHttpClient).send(any(), any());
-
+        Server server = new Server(new InetSocketAddress("localhost", 8080));
+        server.start();
         //Index a few more documents
         new UpdateRequest()
           .add(id, "14", "a_s", "hello", "a_i", "13", "a_f", "9")
-          .add(id, "15", "a_s", "hello", "a_i", "14", "a_f", "10")
           .add(id, "16", "a_s", "hellohello", "a_i", "14", "a_f", "10")
           .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
 
         dstream.open();
-
         Tuple tuple = dstream.read();
         assertEquals("14", tuple.get(id));
-        tuple = dstream.read();
-        assertEquals("15", tuple.get(id));
 
         dstream.shutdown();
         tuple = dstream.read();
         assertEquals(true, tuple.EOF);
 
+        server.stop();
       } finally {
         dstream.close();
       }
