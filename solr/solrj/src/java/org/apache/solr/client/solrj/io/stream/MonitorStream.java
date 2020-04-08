@@ -43,8 +43,9 @@ public class MonitorStream extends TupleStream implements Expressible {
 
   private DaemonStream daemonStream;
   private final String UPDATE_OPERATOR = "update";
-  String id = null;
-  String operator = null;
+  private final String OPERATOR_PARAM = "operator";
+  private final String URL_PARAM = "url";
+  private final String FIELD_PARAM = "fl";
 
   public MonitorStream(StreamExpression expression, StreamFactory factory) throws IOException {
     // get parameters by index
@@ -62,28 +63,31 @@ public class MonitorStream extends TupleStream implements Expressible {
     }
 
     StreamExpressionNamedParameter idExpression = factory.getNamedOperand(expression, ID);
+    String id = null;
     if(idExpression == null) {
       throw new IOException("Invalid expression id parameter expected");
     } else {
       id = ((StreamExpressionValue) idExpression.getParameter()).getValue();
     }
 
-    StreamExpressionNamedParameter operatorExpression = factory.getNamedOperand(expression, "operator");
+    StreamExpressionNamedParameter operatorExpression = factory.getNamedOperand(expression, OPERATOR_PARAM);
+    String operator = null;
     if(operatorExpression == null) {
-      throw new IOException("Invalid expression operator parameter expected");
+      throw new IOException("Invalid expression for operator parameter");
     } else {
-       operator = ((StreamExpressionValue) operatorExpression.getParameter()).getValue();
+      operator = ((StreamExpressionValue) operatorExpression.getParameter()).getValue();
     }
 
-    StreamExpressionNamedParameter flParam = factory.getNamedOperand(expression, "fl");
+    StreamExpressionNamedParameter flParam = factory.getNamedOperand(expression, FIELD_PARAM);
     if(null == flParam) {
       throw new IOException("invalid TopicStream fl cannot be null");
     }
 
     ModifiableSolrParams solrParams = new ModifiableSolrParams();
     for(StreamExpressionNamedParameter namedParam : namedParams){
-      if(!namedParam.getName().equals(ID) && !namedParam.getName().equals("operator")) {
-        solrParams.set(namedParam.getName(), namedParam.getParameter().toString().trim());
+      String paramName = namedParam.getName();
+      if(!paramName.equals(ID) && !paramName.equals(OPERATOR_PARAM) && !paramName.equals(URL_PARAM)) {
+        solrParams.set(paramName, namedParam.getParameter().toString().trim());
       }
     }
 
@@ -93,7 +97,14 @@ public class MonitorStream extends TupleStream implements Expressible {
       init(id, destinationCollection, topicCollection, zkHost, solrParams);
 
     } else {
-      init(id, topicCollection, zkHost, solrParams);
+      StreamExpressionNamedParameter urlExpression = factory.getNamedOperand(expression, URL_PARAM);
+      String url = null;
+      if(urlExpression == null) {
+        throw new IOException("Invalid expression for url parameter ");
+      } else {
+        url = ((StreamExpressionValue) urlExpression.getParameter()).getValue();
+      }
+      init(id, topicCollection, zkHost, solrParams, url);
     }
   }
 
@@ -101,34 +112,34 @@ public class MonitorStream extends TupleStream implements Expressible {
     init(destinationCollection, topicCollection, id, zkHost, solrParams);
   }
 
-  public MonitorStream(String id, String topicCollection, String zkHost, SolrParams solrParams) throws IOException{
-    init(topicCollection, id, zkHost, solrParams);
+  public MonitorStream(String id, String topicCollection, String zkHost, SolrParams solrParams, String url) throws IOException{
+    init(topicCollection, id, zkHost, solrParams, url);
   }
 
-  public void init(String id, String topicCollection, String zkHost, SolrParams solrParams) throws IOException {
+  public void init(String id, String topicCollection, String zkHost, SolrParams solrParams, String url) throws IOException {
     long initialCheckpoint = -1;
     long checkpointEvery = -1;
     long runInterval = 50;
     int queueSize = 0;
 
-    String topicId = "percolate-".concat(UUID.randomUUID().toString());
+    String topicId = "monitor-".concat(UUID.randomUUID().toString());
     TopicStream topicStream = new TopicStream(zkHost, topicCollection, topicCollection, topicId,
       initialCheckpoint, checkpointEvery, solrParams);
 
-    AlertStream alertStream = new AlertStream(topicStream);
+    AlertStream alertStream = new AlertStream(topicStream, url);
     this.daemonStream = new DaemonStream(alertStream, id, runInterval, queueSize);
   }
 
-    public void init(String id, String destinationCollection, String topicCollection, String zkHost, SolrParams solrParams) throws IOException{
+  public void init(String id, String destinationCollection, String topicCollection, String zkHost, SolrParams solrParams) throws IOException{
     long initialCheckpoint = -1;
     long checkpointEvery = -1;
     long runInterval = 50;
     int updateBatchSize = 100;
     int queueSize = 0;
 
-    String topicId = "percolate-".concat(UUID.randomUUID().toString());
+    String topicId = "monitor-".concat(UUID.randomUUID().toString());
     TopicStream topicStream = new TopicStream(zkHost, topicCollection, topicCollection, topicId,
-                                              initialCheckpoint, checkpointEvery, solrParams);
+      initialCheckpoint, checkpointEvery, solrParams);
 
     UpdateStream updateStream = new UpdateStream(destinationCollection, topicStream, zkHost, updateBatchSize);
     this.daemonStream = new DaemonStream(updateStream, id, runInterval, queueSize);

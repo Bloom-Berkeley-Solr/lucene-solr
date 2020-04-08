@@ -19,6 +19,8 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -64,9 +66,11 @@ import org.junit.Test;
 import org.mockito.Mockito;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @Slow
 @SolrTestCaseJ4.SuppressSSL
@@ -2120,7 +2124,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
     SolrClientCache cache = new SolrClientCache();
     try {
-      MonitorStream pstream = null;
+      MonitorStream mstream = null;
       TupleStream topicStream = null;
       TupleStream searchStream = null;
 
@@ -2138,23 +2142,26 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         cluster.getSolrClient().commit("collection1");
 
         /* Test with the AlertStream */
-//        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"alert\", collection1, fl=\"id\", q=\"a_s:hello\")");
-//        pstream = (MonitorStream) factory.constructStream(expression);
-//        pstream.setStreamContext(context);
-//        pstream.open();
-//
-//        // Index a few more documents
-//        new UpdateRequest()
-//          .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "1")
-//          .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
-//          .add(id, "3", "a_s", "helloWorld", "a_i", "3", "a_f", "3")
-//          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"alert\", collection1, fl=\"id\", q=\"a_s:hello\", url=\"http://localhost:8080/abc\")");
+        mstream = (MonitorStream) factory.constructStream(expression);
+        mstream.setStreamContext(context);
+        mstream.open();
+
+        //TODO: mock the httpClient to test alert function
+        // Index a few more documents
+        new UpdateRequest()
+          .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "1")
+          .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
+          .add(id, "3", "a_s", "helloWorld", "a_i", "3", "a_f", "3")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        mstream.close();
 
         /* Test with the UpdateStream */
         expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"update\", collection1, destinationCollection, fl=\"id\", q=\"a_s:hello\")");
-        pstream = (MonitorStream) factory.constructStream(expression);
-        pstream.setStreamContext(context);
-        pstream.open();
+        mstream = (MonitorStream) factory.constructStream(expression);
+        mstream.setStreamContext(context);
+        mstream.open();
 
         expression = StreamExpressionParser.parse("search(destinationCollection, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_i asc\")");
         searchStream = new CloudSolrStream(expression, factory);
@@ -2171,18 +2178,19 @@ public class StreamExpressionTest extends SolrCloudTestCase {
           .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
 
         //Read from the same DaemonStream stream
-        pstream.read();
+        mstream.read();
         cluster.getSolrClient().commit("collection1");
 
+        //TODO: Find a better way than sleep to wait check for update in destination collection
         TimeUnit.SECONDS.sleep(5);
 
         //Ensure that destinationCollection actually has the new docs.
         cluster.getSolrClient().commit("destinationCollection");
         assertEquals( 2, getTuples(searchStream).size());
 
-        pstream.shutdown();
+        mstream.shutdown();
       } finally {
-        pstream.close();
+        mstream.close();
       }
     } finally {
       cache.close();
@@ -2224,13 +2232,15 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       AlertStream astream = null;
 
       try {
-        expression = StreamExpressionParser.parse("alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2))");
+        expression = StreamExpressionParser.parse("alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2), url=\"http://localhost:8080/abc\")");
         astream = (AlertStream) factory.constructStream(expression);
         StreamContext context = new StreamContext();
         context.setSolrClientCache(cache);
         astream.setStreamContext(context);
 
+        // Mock the alert stream
         astream = Mockito.spy(astream);
+        doNothing().when(astream).alert(any(Tuple.class));
         // The initial call to the topic function establishes the checkpoints for the specific topic ID
         getTuples(astream);
 
@@ -2262,10 +2272,17 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         context.setSolrClientCache(cache);
 
         expression = StreamExpressionParser.parse("daemon(id=\"test\", runInterval=\"50\", queueSize=\"9\"," +
-          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2)))"
+          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2)," +
+          "url=\"http://localhost:8080/abc\"))"
         );
         dstream = (DaemonStream) factory.constructStream(expression);
         dstream.setStreamContext(context);
+//
+//        HttpClient httpClient = Mockito.mock(HttpClient.class);
+//        HttpResponse httpResponse = Mockito.mock(HttpResponse.class);
+//        when(httpClient.execute(Mockito.any())).thenReturn(httpResponse);
+
+//        doNothing().when(mockHttpClient).send(any(), any());
 
         //Index a few more documents
         new UpdateRequest()

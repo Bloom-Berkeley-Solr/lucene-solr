@@ -18,38 +18,65 @@
 package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
+import org.apache.http.HttpEntity;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.StreamComparator;
 import org.apache.solr.client.solrj.io.stream.expr.Explanation;
 import org.apache.solr.client.solrj.io.stream.expr.Expressible;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExplanation;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
+import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionNamedParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
+import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
+import org.apache.solr.common.SolrException;
+import org.eclipse.jetty.util.URIUtil;
 
 
 public class AlertStream extends TupleStream implements Expressible {
 
   TupleStream tupleStream;
+  String targetURL;
 
   public AlertStream(StreamExpression expression, StreamFactory factory) throws IOException {
     List<StreamExpression> streamExpressions = factory.getExpressionOperandsRepresentingTypes(expression, Expressible.class, TupleStream.class);
 
+    String targetURL = null;
+
     // parameters by position
     TupleStream tupleStream = factory.constructStream(streamExpressions.get(0));
+    StreamExpressionNamedParameter urlExpression = factory.getNamedOperand(expression, "url");
 
-    init(tupleStream);
+    if (urlExpression != null) {
+      targetURL = ((StreamExpressionValue) urlExpression.getParameter()).getValue();
+    }
+
+    init(tupleStream, targetURL);
   }
 
-  public void init(TupleStream tupleStream) {
+  public void init(TupleStream tupleStream, String targetURL) {
     this.tupleStream = tupleStream;
+    this.targetURL = targetURL;
   }
 
-  public AlertStream(TupleStream tupleStream) {
-    init(tupleStream);
+  public AlertStream(TupleStream tupleStream, String targetURL) {
+    init(tupleStream, targetURL);
   }
 
   @Override
@@ -78,7 +105,7 @@ public class AlertStream extends TupleStream implements Expressible {
   public Tuple read() throws IOException {
     Tuple tuple = tupleStream.read();
 
-    if(!tuple.EOF) {
+    if (!tuple.EOF) {
       alert(tuple);
     }
     return tuple;
@@ -99,16 +126,38 @@ public class AlertStream extends TupleStream implements Expressible {
   @Override
   public Explanation toExplanation(StreamFactory factory) throws IOException {
     return new StreamExplanation(getStreamNodeId().toString())
-        .withChildren(new Explanation[]{
-            tupleStream.toExplanation(factory)
-        })
-        .withFunctionName(factory.getFunctionName(this.getClass()))
-        .withImplementingClass(this.getClass().getName())
-        .withExpressionType(Explanation.ExpressionType.STREAM_DECORATOR)
-        .withExpression(toExpression(factory).toString());
+      .withChildren(new Explanation[]{
+        tupleStream.toExplanation(factory)
+      })
+      .withFunctionName(factory.getFunctionName(this.getClass()))
+      .withImplementingClass(this.getClass().getName())
+      .withExpressionType(Explanation.ExpressionType.STREAM_DECORATOR)
+      .withExpression(toExpression(factory).toString());
   }
 
-  void alert(Tuple tuple) {
-    //TODO: Add alert actions
+  void alert(Tuple tuple) throws IOException {
+    try {
+      Map<String, Map> requestBody = new HashMap<String, Map>();
+      requestBody.put("matches", tuple.fields);
+
+      CloseableHttpClient httpClient = HttpClients.createDefault();
+      HttpPost httpPost= new HttpPost((URI.create(targetURL)));
+      httpPost.setEntity(new StringEntity(requestBody.toString()));
+
+      httpClient.execute(httpPost);
+      //TODO: Error handling for non-successful response code
+
+      httpClient.close();
+    } catch (ClientProtocolException cpe) {
+      // Currently detecting authentication by string-matching the HTTP response
+      // Perhaps SolrClient should have thrown an exception itself??
+      if (cpe.getMessage().contains("HTTP ERROR 401") || cpe.getMessage().contentEquals("HTTP ERROR 403")) {
+        int code = cpe.getMessage().contains("HTTP ERROR 401") ? 401 : 403;
+        throw new SolrException(SolrException.ErrorCode.getErrorCode(code),
+          "Solr requires authentication for " + targetURL + ". Please supply valid credentials. HTTP code=" + code);
+      } else {
+        throw new SolrException(SolrException.ErrorCode.UNKNOWN, cpe);
+      }
+    }
   }
 }
