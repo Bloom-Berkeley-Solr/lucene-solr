@@ -1941,6 +1941,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @Test
   public void testTopicStream() throws Exception {
+    // Uncomment to always run  test with useAlias = False
     Assume.assumeTrue(!useAlias);
 
     new UpdateRequest()
@@ -2103,7 +2104,8 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @Test
   public void testMonitorStream() throws Exception {
-    Assume.assumeTrue(!useAlias);
+    // Uncomment to always run  test with useAlias = False
+     Assume.assumeTrue(!useAlias);
 
     CollectionAdminRequest.createCollection("destinationCollection", "conf", 2, 1).process(cluster.getSolrClient());
     cluster.waitForActiveCollection("destinationCollection", 2, 2);
