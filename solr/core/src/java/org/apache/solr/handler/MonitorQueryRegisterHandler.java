@@ -29,6 +29,7 @@ import java.util.Map;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.Query;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.Base64;
@@ -42,6 +43,7 @@ import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.processor.MonitorUpdateProcessorFactory;
 import org.apache.solr.util.plugin.SolrCoreAware;
 import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.data.Stat;
 import org.jose4j.json.JsonUtil;
 import org.jose4j.lang.JoseException;
 
@@ -49,6 +51,7 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
 
   public static final String PARSER_DEFAULT_FIELD_NAME = "defaultField";
   public static final String PARAM_QUERY_ID_NAME = "id";
+  public static final String PARAM_MAX_TRY = "maxtry";
   public static final String PARAM_COLLECTION_NAMES = "collections";
   public static final String ZK_KEY_SOLR_PARAMS = "params";
   public static final String ZK_KEY_QUERY_STRING = "q";
@@ -73,6 +76,12 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
     SolrParams params = req.getParams();
     String queryId = params.get(PARAM_QUERY_ID_NAME);
 
+    // optional field: maximum number of attempts to update zk node
+    Integer maxTry = params.getInt(PARAM_MAX_TRY);
+    if (maxTry == null) {
+      maxTry = 0;
+    }
+
     // use query component to parse query string
     List<SearchComponent> components = new ArrayList<>();
     components.add(core.getSearchComponent("query"));
@@ -84,23 +93,29 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
     byte[] paramBytes = getBytes(params);
     String paramString = Base64.byteArrayToBase64(paramBytes);
 
-    registerQueryToZk(client, queryId, query, paramString);
+    registerQueryToZk(client, queryId, query, paramString, maxTry);
   }
 
   /**
    * Write the query to Zookeeper.
    * All queries are stored in a single node, so read -> modify -> write.
-   * "a single handler instance is reused for all relevant queries" -> synchronized method
+   * <p>
+   * To prevent race condition:
+   * <p>
+   * Single instance: "a single handler instance is reused for all relevant queries" -> synchronized method
+   * Multiple instances (nodes), use the node version, retry until success
    *
    * @param client      Zookeeper client
    * @param queryId     The user specified id of query
    * @param query       Parsed Lucene {@link Query} object
    * @param paramString The string(base64) representation of the serialized query
+   * @param maxTryTimes The maximum number of attempts. 0 if no limit.
    * @throws KeeperException      If an exception occurs related to Zookeeper
    * @throws InterruptedException If thread is interrupted
    * @throws JoseException        If an exception occurs in JsonUtil
    */
-  synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString) throws KeeperException, InterruptedException, JoseException {
+  synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString, int maxTryTimes) throws KeeperException, InterruptedException, JoseException {
+    // make sure the node exist
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
     if (!assureZkNodeExist && !client.exists(path, true)) {
       try {
@@ -112,24 +127,44 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
     }
 
     // read & prepare data
-    byte[] bytesRead = client.getData(path, null, null, true);
-    String jsonStr = "{}";
-    if (bytesRead != null)
-      jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
-    long version = 0;
-    Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
-    if (oldJsonMap.containsKey(queryId)) {
-      version = (Long) ((Map) oldJsonMap.get(queryId)).get(ZK_KEY_VERSION) + 1;
-    }
+    int attemptCount = 0;
+    boolean finished = false;
+    while (!finished) {
+      if (maxTryTimes > 0 && attemptCount > maxTryTimes) {
+        throw new SolrException(SolrException.ErrorCode.UNKNOWN,
+            "Tried " + attemptCount + " time(s) to update Zookeeper node but still failed. " +
+                "May be because of too many concurrent query registration)");
+      }
+      Stat stat = new Stat();
+      final byte[] bytesRead = client.getData(path, null, stat, true);
+      final int zkNodeVersion = stat.getVersion();
+      String jsonStr = "{}";
+      if (bytesRead != null)
+        jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
+      long queryVersion = 0;
+      Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
+      if (oldJsonMap.containsKey(queryId)) {
+        queryVersion = (Long) ((Map) oldJsonMap.get(queryId)).get(ZK_KEY_VERSION) + 1;
+      }
 
-    // write data
-    Map<String, Object> queryNodeMap = new HashMap<String, Object>();
-    LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
-    queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
-    queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
-    queryNodeMap.put(ZK_KEY_VERSION, version);
-    newJsonMap.put(queryId, queryNodeMap);
-    client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(StandardCharsets.UTF_8), true);
+      // write data
+      Map<String, Object> queryNodeMap = new HashMap<String, Object>();
+      LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
+      queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
+      queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
+      queryNodeMap.put(ZK_KEY_VERSION, queryVersion);
+      newJsonMap.put(queryId, queryNodeMap);
+      try {
+        attemptCount++;
+        client.setData(path, JsonUtil.toJson(newJsonMap).getBytes(StandardCharsets.UTF_8), zkNodeVersion, true);
+        finished = true;
+      } catch (KeeperException e) {
+        // if the exception is caused by version, try again
+        if (e.code() != KeeperException.Code.BADVERSION) {
+          throw e;
+        }
+      }
+    }
   }
 
 
