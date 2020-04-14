@@ -103,7 +103,11 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
   synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString) throws KeeperException, InterruptedException, JoseException {
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
     if (!assureZkNodeExist && !client.exists(path, true)) {
-      client.makePath(path, true);
+      try {
+        client.makePath(path, true);
+      } catch (KeeperException e) {
+        if (e.code() != KeeperException.Code.NODEEXISTS) throw e;
+      }
       assureZkNodeExist = true;
     }
 

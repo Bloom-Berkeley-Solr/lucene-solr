@@ -131,7 +131,11 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       this.client = zc.getZkClient();
       zc.addOnReconnectListener(new ZkReconnectListener(req));
       if (!client.exists(zkQueryPath, true)) {
-        client.makePath(zkQueryPath, true);
+        try {
+          client.makePath(zkQueryPath, true);
+        } catch (KeeperException e) {
+          if (e.code() != KeeperException.Code.NODEEXISTS) throw e;
+        }
       }
       syncQueries(req);
     } catch (IOException | KeeperException | InterruptedException ex) {
