@@ -747,7 +747,7 @@
   </requestHandler>
 
   <!-- A request handler that returns indented JSON by default -->
-  <requestHandler name="/register" class="solr.QueryRegisterHandler">
+  <requestHandler name="/register" class="solr.MonitorQueryRegisterHandler">
     <lst name="defaults">
       <str name="id">defaultId</str>
       <str name="q">*:*</str>

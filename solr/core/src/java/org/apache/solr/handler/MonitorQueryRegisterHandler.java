@@ -45,7 +45,7 @@ import org.apache.zookeeper.KeeperException;
 import org.jose4j.json.JsonUtil;
 import org.jose4j.lang.JoseException;
 
-public class QueryRegisterHandler extends RequestHandlerBase implements SolrCoreAware {
+public class MonitorQueryRegisterHandler extends RequestHandlerBase implements SolrCoreAware {
 
   public static final String PARSER_DEFAULT_FIELD_NAME = "defaultField";
   public static final String PARAM_QUERY_ID_NAME = "id";
@@ -64,7 +64,7 @@ public class QueryRegisterHandler extends RequestHandlerBase implements SolrCore
       throw new IllegalArgumentException(e);
     }
   }
-
+  
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
     CoreContainer cc = req.getCore().getCoreContainer();

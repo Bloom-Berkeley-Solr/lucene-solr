@@ -31,15 +31,16 @@ import org.apache.solr.update.AddUpdateCommand;
 public class MonitorUpdateProcessor extends UpdateRequestProcessor {
 
   private final SolrQueryResponse rsp;
+  private final Monitor monitor;
 
-  public MonitorUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {
+  public MonitorUpdateProcessor(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next, Monitor monitor) {
     super(next);
     this.rsp = rsp;
+    this.monitor = monitor;
   }
 
   @Override
   public void processAdd(AddUpdateCommand cmd) throws IOException {
-    Monitor monitor = MonitorUpdateProcessorFactory.getMonitor();
     MatchingQueries<QueryMatch> matches = monitor.match(cmd.getLuceneDocument(), QueryMatch.SIMPLE_MATCHER);
     List<String> matchedIds = new ArrayList<>();
     matches.getMatches().forEach(x -> matchedIds.add(x.getQueryId()));

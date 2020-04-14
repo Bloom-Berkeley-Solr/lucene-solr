@@ -39,7 +39,7 @@ import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.Base64;
 import org.apache.solr.common.util.JavaBinCodec;
-import org.apache.solr.handler.QueryRegisterHandler;
+import org.apache.solr.handler.MonitorQueryRegisterHandler;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequestBase;
 import org.apache.solr.response.SolrQueryResponse;
@@ -83,7 +83,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     }
   }
 
-  private static Monitor singletonMonitor = null;
+  private Monitor singletonMonitor = null;
 
   // use this hash map to track all local queries, can be used to check the difference during synchronization
   private HashMap<String, Long> queryVersion = new HashMap<>();
@@ -92,7 +92,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
   public static final String zkQueryPath = "/monitor.json";
 
-  public static Monitor getMonitor() {
+  public Monitor getMonitor() {
     return singletonMonitor;
   }
 
@@ -116,7 +116,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
     if (singletonMonitor == null)
       createMonitorInstance(req);
 
-    return new MonitorUpdateProcessor(req, rsp, next);
+    return new MonitorUpdateProcessor(req, rsp, next, getMonitor());
   }
 
   /**
@@ -130,8 +130,11 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       ZkController zc = req.getCore().getCoreContainer().getZkController();
       this.client = zc.getZkClient();
       zc.addOnReconnectListener(new ZkReconnectListener(req));
+      if (!client.exists(zkQueryPath, true)) {
+        client.makePath(zkQueryPath, true);
+      }
       syncQueries(req);
-    } catch (IOException ex) {
+    } catch (IOException | KeeperException | InterruptedException ex) {
       throw new SolrException(SolrException.ErrorCode.UNKNOWN, ex);
     }
   }
@@ -143,7 +146,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
    */
   synchronized void syncQueries(SolrQueryRequest req) {
     try {
-      if (client.exists(zkQueryPath, new MonitorWatcher(req), true) == null) return;
+      // if (client.exists(zkQueryPath, new MonitorWatcher(req), true) == null) return;
       byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(req), null, true);
       String jsonStr = "{}";
       if (bytesRead != null) {
@@ -186,12 +189,12 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
       Map<String, Object> queryNodeMap = (Map) value;
 
       // check if this query already exist in local monitor (with latest version)
-      Long version = (Long) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_VERSION);
+      Long version = (Long) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_VERSION);
       if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
       queryVersion.put(queryId, version);
 
-      String queryString = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_QUERY_STRING);
-      String paramsStr = (String) queryNodeMap.get(QueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
+      String queryString = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_QUERY_STRING);
+      String paramsStr = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
 
       // deserialize params
       byte[] paramBytes = Base64.base64ToByteArray(paramsStr);

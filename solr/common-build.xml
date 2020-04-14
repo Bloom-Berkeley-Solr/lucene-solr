@@ -101,7 +101,6 @@
     <pathelement location="${highlighter.jar}"/>
     <pathelement location="${memory.jar}"/>
     <pathelement location="${misc.jar}"/>
-    <pathelement location="${monitor.jar}"/>
     <pathelement location="${spatial-extras.jar}"/>
     <pathelement location="${spatial3d.jar}"/>
     <pathelement location="${expressions.jar}"/>
