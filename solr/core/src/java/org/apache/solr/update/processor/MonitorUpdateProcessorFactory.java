@@ -179,31 +179,32 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
    */
   private ArrayList<MonitorQuery> getNewQueries(SolrQueryRequest req, Map<String, Object> allQueries) throws IOException {
     ArrayList<MonitorQuery> queries = new ArrayList<>();
+    try {
+      for (String queryId : allQueries.keySet()) {
 
-    for (String queryId : allQueries.keySet()) {
+        // read and deserialize values from Zk
+        Object value = allQueries.get(queryId);
+        Map<String, Object> queryNodeMap = (Map) value;
+        // check if this query already exist in local monitor (with latest version)
+        Long version = (Long) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_VERSION);
+        if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
+        queryVersion.put(queryId, version);
 
-      // read and deserialize values from Zk
-      Object value = allQueries.get(queryId);
-      if (!(value instanceof Map))
-        throw new SolrException(SolrException.ErrorCode.UNKNOWN, "Only support String as values in monitor queries json configuration");
-      Map<String, Object> queryNodeMap = (Map) value;
+        String queryString = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_QUERY_STRING);
+        String paramsStr = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
 
-      // check if this query already exist in local monitor (with latest version)
-      Long version = (Long) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_VERSION);
-      if (queryVersion.containsKey(queryId) && version.equals(queryVersion.get(queryId))) continue;
-      queryVersion.put(queryId, version);
+        // deserialize params
+        byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
+        SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
 
-      String queryString = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_QUERY_STRING);
-      String paramsStr = (String) queryNodeMap.get(MonitorQueryRegisterHandler.ZK_KEY_SOLR_PARAMS);
-
-      // deserialize params
-      byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
-      SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
-
-      // reconstruct SolrQueryRequest
-      SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
-      };
-      queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
+        // reconstruct SolrQueryRequest
+        SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
+          // default SolrQueryRequestBase
+        };
+        queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
+      }
+    } catch (Exception e) {
+      throw new SolrException(SolrException.ErrorCode.INVALID_STATE, e);
     }
     return queries;
   }

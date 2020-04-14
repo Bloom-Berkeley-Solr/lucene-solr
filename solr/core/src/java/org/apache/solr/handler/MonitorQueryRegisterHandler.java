@@ -55,6 +55,7 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
   public static final String ZK_KEY_VERSION = "version";
 
   private SolrCore core;
+  private boolean assureZkNodeExist = false;
 
   static Query parse(String query) {
     try {
@@ -64,7 +65,7 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
       throw new IllegalArgumentException(e);
     }
   }
-  
+
   @Override
   public void handleRequestBody(SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
     CoreContainer cc = req.getCore().getCoreContainer();
@@ -101,8 +102,9 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
    */
   synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString) throws KeeperException, InterruptedException, JoseException {
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
-    if (!client.exists(path, true)) {
+    if (!assureZkNodeExist && !client.exists(path, true)) {
       client.makePath(path, true);
+      assureZkNodeExist = true;
     }
 
     // read & prepare data
