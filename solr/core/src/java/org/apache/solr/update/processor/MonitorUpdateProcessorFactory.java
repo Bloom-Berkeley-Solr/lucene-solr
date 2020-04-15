@@ -113,8 +113,9 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
   @Override
   public UpdateRequestProcessor getInstance(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {
-    if (singletonMonitor == null)
+    if (singletonMonitor == null) {
       createMonitorInstance(req);
+    }
 
     return new MonitorUpdateProcessor(req, rsp, next, getMonitor());
   }
@@ -134,7 +135,9 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
         try {
           client.makePath(zkQueryPath, true);
         } catch (KeeperException e) {
-          if (e.code() != KeeperException.Code.NODEEXISTS) throw e;
+          if (e.code() != KeeperException.Code.NODEEXISTS) {
+            throw e;
+          }
         }
       }
       syncQueries(req);

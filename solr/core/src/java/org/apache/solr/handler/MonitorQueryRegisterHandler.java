@@ -139,8 +139,9 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
       final byte[] bytesRead = client.getData(path, null, stat, true);
       final int zkNodeVersion = stat.getVersion();
       String jsonStr = "{}";
-      if (bytesRead != null)
+      if (bytesRead != null) {
         jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
+      }
       long queryVersion = 0;
       Map<String, Object> oldJsonMap = JsonUtil.parseJson(jsonStr);
       if (oldJsonMap.containsKey(queryId)) {
