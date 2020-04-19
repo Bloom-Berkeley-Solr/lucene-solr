@@ -87,13 +87,12 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
     components.add(core.getSearchComponent("query"));
     ResponseBuilder rb = new ResponseBuilder(req, rsp, components);
     for (SearchComponent c : components) c.prepare(rb);
-    Query query = rb.getQuery();
 
     // serialize SolrParams
     byte[] paramBytes = getBytes(params);
     String paramString = Base64.byteArrayToBase64(paramBytes);
 
-    registerQueryToZk(client, queryId, query, paramString, maxTry);
+    registerQueryToZk(client, queryId, rb.getQueryString(), paramString, maxTry);
   }
 
   /**
@@ -107,14 +106,14 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
    *
    * @param client      Zookeeper client
    * @param queryId     The user specified id of query
-   * @param query       Parsed Lucene {@link Query} object
-   * @param paramString The string(base64) representation of the serialized query
+   * @param queryString The query string
+   * @param paramString The string (base64) representation of the serialized query
    * @param maxTryTimes The maximum number of attempts. 0 if no limit.
    * @throws KeeperException      If an exception occurs related to Zookeeper
    * @throws InterruptedException If thread is interrupted
    * @throws JoseException        If an exception occurs in JsonUtil
    */
-  synchronized private void registerQueryToZk(SolrZkClient client, String queryId, Query query, String paramString, int maxTryTimes) throws KeeperException, InterruptedException, JoseException {
+  synchronized private void registerQueryToZk(SolrZkClient client, String queryId, String queryString, String paramString, int maxTryTimes) throws KeeperException, InterruptedException, JoseException {
     // make sure the node exist
     String path = MonitorUpdateProcessorFactory.zkQueryPath;
     if (!assureZkNodeExist && !client.exists(path, true)) {
@@ -151,7 +150,7 @@ public class MonitorQueryRegisterHandler extends RequestHandlerBase implements S
       // write data
       Map<String, Object> queryNodeMap = new HashMap<String, Object>();
       LinkedHashMap<String, Object> newJsonMap = new LinkedHashMap<>(oldJsonMap);
-      queryNodeMap.put(ZK_KEY_QUERY_STRING, query.toString());
+      queryNodeMap.put(ZK_KEY_QUERY_STRING, queryString);
       queryNodeMap.put(ZK_KEY_SOLR_PARAMS, paramString);
       queryNodeMap.put(ZK_KEY_VERSION, queryVersion);
       newJsonMap.put(queryId, queryNodeMap);

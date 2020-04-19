@@ -202,7 +202,23 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
 
         // deserialize params
         byte[] paramBytes = Base64.base64ToByteArray(paramsStr);
-        SolrParams params = new MultiMapSolrParams((Map) getObject(paramBytes));
+        Map rawParamMap = (Map) getObject(paramBytes);
+        Map<String, String[]> paramMap = new HashMap<>();
+
+
+        for (Object rawKey : rawParamMap.keySet()) {
+          String key = (String) rawKey;
+          Object rawValue = rawParamMap.get(key);
+          if (rawValue instanceof String[]) {
+            paramMap.put(key, (String[]) rawValue);
+          } else if (rawValue instanceof String) {
+            paramMap.put(key, new String[]{(String) rawValue});
+          } else {
+            throw new SolrException(SolrException.ErrorCode.INVALID_STATE, "The params of monitor query is neither Map or MultiMap of String.");
+          }
+        }
+
+        SolrParams params = new MultiMapSolrParams(paramMap);
 
         // reconstruct SolrQueryRequest
         SolrQueryRequest reconstructedReq = new SolrQueryRequestBase(req.getCore(), params) {
@@ -210,7 +226,8 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
         };
         queries.add(new MonitorQuery(queryId, parse(queryString, reconstructedReq)));
       }
-    } catch (Exception e) {
+    } catch (
+        Exception e) {
       throw new SolrException(SolrException.ErrorCode.INVALID_STATE, e);
     }
     return queries;
