@@ -154,7 +154,7 @@ public class MonitorUpdateProcessorFactory extends UpdateRequestProcessorFactory
   synchronized void syncQueries(SolrQueryRequest req) {
     try {
       // if (client.exists(zkQueryPath, new MonitorWatcher(req), true) == null) return;
-      byte[] bytesRead = client.getData(zkQueryPath, new MonitorWatcher(req), null, true);
+      byte[] bytesRead = client.getData(zkQueryPath, client.wrapWatcher(new MonitorWatcher(req)), null, true);
       String jsonStr = "{}";
       if (bytesRead != null) {
         jsonStr = new String(bytesRead, StandardCharsets.UTF_8);
