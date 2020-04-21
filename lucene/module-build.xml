@@ -122,6 +122,18 @@
     <property name="test-framework-javadocs.uptodate" value="true"/>
   </target>
 
+
+  <property name="monitor.jar" value="${common.dir}/build/monitor/lucene-monitor-${version}.jar"/>
+  <target name="check-monitor-uptodate" unless="monitor.uptodate">
+    <module-uptodate name="monitor" jarfile="${monitor.jar}" property="monitor.uptodate"/>
+  </target>
+  <target name="jar-monitor" unless="monitor.uptodate" depends="check-monitor-uptodate">
+    <ant dir="${common.dir}/monitor" target="jar-core" inheritall="false">
+      <propertyset refid="uptodate.and.compiled.properties"/>
+    </ant>
+    <property name="monitor.uptodate" value="true"/>
+  </target>
+  
   <property name="queryparser.jar" value="${common.dir}/build/queryparser/lucene-queryparser-${version}.jar"/>
   <target name="check-queryparser-uptodate" unless="queryparser.uptodate">
     <module-uptodate name="queryparser" jarfile="${queryparser.jar}" property="queryparser.uptodate"/>

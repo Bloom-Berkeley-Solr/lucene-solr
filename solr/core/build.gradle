@@ -37,6 +37,7 @@ dependencies {
   api project(':lucene:sandbox')
   api project(':lucene:spatial-extras')
   api project(':lucene:suggest')
+  api project(':lucene:monitor')
 
   // Export these dependencies so that they're imported transitively by
   // other modules.

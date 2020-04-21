@@ -34,5 +34,6 @@
     <orderEntry type="module" module-name="backward-codecs" />
     <orderEntry type="module" module-name="codecs" />
     <orderEntry type="module" module-name="nori" />
+    <orderEntry type="module" module-name="monitor" />
   </component>
 </module>
