@@ -19,6 +19,7 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -28,6 +29,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -56,10 +58,17 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.core.CoreDescriptor;
 import org.apache.solr.core.SolrResourceLoader;
+import org.eclipse.jetty.server.Server;
 import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.Mockito;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 @Slow
 @SolrTestCaseJ4.SuppressSSL
@@ -75,6 +84,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @BeforeClass
   public static void setupCluster() throws Exception {
+    assumeWorkingMockito();
     configureCluster(4)
         .addConfig("conf", getFile("solrj").toPath().resolve("solr").resolve("configsets").resolve("streaming").resolve("conf"))
         .addConfig("ml", getFile("solrj").toPath().resolve("solr").resolve("configsets").resolve("ml").resolve("conf"))
@@ -82,6 +92,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
     String collection;
     useAlias = random().nextBoolean();
+
     if (useAlias) {
       collection = COLLECTIONORALIAS + "_collection";
     } else {
@@ -1976,6 +1987,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @Test
   public void testTopicStream() throws Exception {
+    // Uncomment to always run  test with useAlias = False
     Assume.assumeTrue(!useAlias);
 
     new UpdateRequest()
@@ -2017,8 +2029,8 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       assertEquals(tuples.size(), 0);
 
       cluster.getSolrClient().commit("collection1");
-      //Now check to see if the checkpoints are present
 
+      //Now check to see if the checkpoints are present
               expression = StreamExpressionParser.parse("search(collection1, q=\"id:1000000\", fl=\"id, checkpoint_ss, _version_\", sort=\"id asc\")");
               stream = factory.constructStream(expression);
               context = new StreamContext();
@@ -2088,7 +2100,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
       }
 
       //Test with the DaemonStream
-
       DaemonStream dstream = null;
       try {
         expression = StreamExpressionParser.parse("daemon(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2), id=\"test\", runInterval=\"1000\", queueSize=\"9\")");
@@ -2137,6 +2148,201 @@ public class StreamExpressionTest extends SolrCloudTestCase {
     }
   }
 
+  @Test
+  public void testMonitorStream() throws Exception {
+    CollectionAdminRequest.createCollection("destinationCollection", "conf", 2, 1).process(cluster.getSolrClient());
+    cluster.waitForActiveCollection("destinationCollection", 2, 2);
+
+    StreamFactory factory = new StreamFactory()
+      .withCollectionZkHost("collection1", cluster.getZkServer().getZkAddress())
+      .withCollectionZkHost("destinationCollection", cluster.getZkServer().getZkAddress())
+      .withFunctionName("topic", TopicStream.class)
+      .withFunctionName("search", CloudSolrStream.class)
+      .withFunctionName("update", UpdateStream.class)
+      .withFunctionName("daemon", DaemonStream.class)
+      .withFunctionName("alert", AlertStream.class)
+      .withFunctionName("monitor", MonitorStream.class);
+
+    StreamExpression expression;
+    List<Tuple> tuples;
+
+    SolrClientCache cache = new SolrClientCache();
+    try {
+      MonitorStream mstream = null;
+      TupleStream topicStream = null;
+      TupleStream searchStream = null;
+
+      try {
+        StreamContext context = new StreamContext();
+        context.setSolrClientCache(cache);
+
+        expression = StreamExpressionParser.parse("topic(collection1, collection1, q=\"a_s:hello\", fl=\"id\", id=\"1000000\", checkpointEvery=3)");
+        topicStream = factory.constructStream(expression);
+        topicStream.setStreamContext(context);
+        tuples = getTuples(topicStream);
+
+        //Should be zero because the checkpoints will be set to the highest vesion on the shards.
+        assertEquals(tuples.size(), 0);
+        cluster.getSolrClient().commit("collection1");
+
+        /* Test with the AlertStream */
+        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"alert\", collection1, fl=\"id\", q=\"a_s:hello\", url=\"http://localhost:8080/abc\")");
+        mstream = (MonitorStream) factory.constructStream(expression);
+        mstream.setStreamContext(context);
+        mstream.open();
+
+        //TODO: mock the httpClient to test alert function
+        // Index a few more documents
+        new UpdateRequest()
+          .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "1")
+          .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
+          .add(id, "3", "a_s", "helloWorld", "a_i", "3", "a_f", "3")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        mstream.close();
+
+        /* Test with the UpdateStream */
+        expression = StreamExpressionParser.parse("monitor(id=\"test\", operator=\"update\", collection1, destinationCollection, fl=\"id\", q=\"a_s:hello\")");
+        mstream = (MonitorStream) factory.constructStream(expression);
+        mstream.setStreamContext(context);
+        mstream.open();
+
+        expression = StreamExpressionParser.parse("search(destinationCollection, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_i asc\")");
+        searchStream = new CloudSolrStream(expression, factory);
+        searchStream.setStreamContext(context);
+
+        //Ensure that destinationCollection is empty before the update.
+        assertEquals("destinationCollection should be empty before update", 0, getTuples(searchStream).size());
+
+        // Index a few more documents
+        new UpdateRequest()
+          .add(id, "12", "a_s", "hello", "a_i", "13", "a_f", "9")
+          .add(id, "13", "a_s", "hello", "a_i", "13", "a_f", "9")
+          .add(id, "14", "a_s", "helloWorld", "a_i", "14", "a_f", "10")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        //Read from the same DaemonStream stream
+        mstream.read();
+        cluster.getSolrClient().commit("collection1");
+
+        //TODO: Find a better way than sleep to wait check for update in destination collection
+        TimeUnit.SECONDS.sleep(5);
+
+        //Ensure that destinationCollection actually has the new docs.
+        cluster.getSolrClient().commit("destinationCollection");
+        assertEquals( 2, getTuples(searchStream).size());
+
+        mstream.shutdown();
+      } finally {
+        mstream.close();
+      }
+    } finally {
+      cache.close();
+    }
+  }
+
+  @Test
+  public void testAlertStream() throws Exception {
+    new UpdateRequest()
+        .add(id, "0", "a_s", "hello", "a_i", "0", "a_f", "1")
+        .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
+        .add(id, "3", "a_s", "hello", "a_i", "3", "a_f", "3")
+        .add(id, "4", "a_s", "hello", "a_i", "4", "a_f", "4")
+        .add(id, "1", "a_s", "hello", "a_i", "1", "a_f", "5")
+        .add(id, "5", "a_s", "hello", "a_i", "10", "a_f", "6")
+        .add(id, "6", "a_s", "hello", "a_i", "11", "a_f", "7")
+        .add(id, "7", "a_s", "hello", "a_i", "12", "a_f", "8")
+        .add(id, "8", "a_s", "hello", "a_i", "13", "a_f", "9")
+        .add(id, "9", "a_s", "hello", "a_i", "14", "a_f", "10")
+        .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+    StreamFactory factory = new StreamFactory()
+        .withCollectionZkHost("collection1", cluster.getZkServer().getZkAddress())
+        .withFunctionName("topic", TopicStream.class)
+        .withFunctionName("search", CloudSolrStream.class)
+        .withFunctionName("update", UpdateStream.class)
+        .withFunctionName("daemon", DaemonStream.class)
+        .withFunctionName("alert", AlertStream.class);
+
+    StreamExpression expression;
+    List<Tuple> tuples;
+
+    SolrClientCache cache = new SolrClientCache();
+
+    try {
+//      Test with the AlertStream
+      AlertStream astream = null;
+
+      try {
+        expression = StreamExpressionParser.parse("alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2), url=\"http://localhost:8080/abc\")");
+        astream = (AlertStream) factory.constructStream(expression);
+        StreamContext context = new StreamContext();
+        context.setSolrClientCache(cache);
+        astream.setStreamContext(context);
+        astream.open();
+        // Mock the alert stream
+        astream = Mockito.spy(astream);
+        doNothing().when(astream).alert(any(Tuple.class));
+
+
+        // The initial call to the topic function establishes the checkpoints for the specific topic ID
+        getTuples(astream);
+
+        // Index a few more documents
+        new UpdateRequest()
+          .add(id, "10", "a_s", "hello", "a_i", "13", "a_f", "11")
+          .add(id, "12", "a_s", "helloWorld", "a_i", "15", "a_f", "13")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        tuples = getTuples(astream);
+
+        assertEquals(1, tuples.size());
+        assertEquals("10", tuples.get(0).get("id"));
+        verify(astream, times(1)).alert(tuples.get(0));
+      } finally {
+        astream.close();
+      }
+
+      // test with daemon stream
+      TupleStream searchStream = null;
+      DaemonStream dstream = null;
+
+      try {
+        // queue size should be set to 0 (default) in production
+        StreamContext context = new StreamContext();
+        context.setSolrClientCache(cache);
+
+        expression = StreamExpressionParser.parse("daemon(id=\"test\", runInterval=\"50\", queueSize=\"9\"," +
+          "alert(topic(collection1, collection1, fl=\"id\", q=\"a_s:hello\", id=\"1000000\", checkpointEvery=2)," +
+          "url=\"http://localhost:8080/abc\"))"
+        );
+        dstream = (DaemonStream) factory.constructStream(expression);
+        dstream.setStreamContext(context);
+
+        Server server = new Server(new InetSocketAddress("localhost", 8080));
+        server.start();
+        //Index a few more documents
+        new UpdateRequest()
+          .add(id, "14", "a_s", "hello", "a_i", "13", "a_f", "9")
+          .add(id, "16", "a_s", "hellohello", "a_i", "14", "a_f", "10")
+          .commit(cluster.getSolrClient(), COLLECTIONORALIAS);
+
+        dstream.open();
+        Tuple tuple = dstream.read();
+        assertEquals("14", tuple.get(id));
+
+        dstream.shutdown();
+        tuple = dstream.read();
+        assertEquals(true, tuple.EOF);
+
+        server.stop();
+      } finally {
+        dstream.close();
+      }
+    } finally {
+      cache.close();
+    }
+  }
 
   @Test
   // commented 4-Sep-2018 @LuceneTestCase.BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // 2-Aug-2018

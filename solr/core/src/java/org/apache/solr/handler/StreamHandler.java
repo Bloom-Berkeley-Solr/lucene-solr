@@ -35,6 +35,7 @@ import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.StreamComparator;
 import org.apache.solr.client.solrj.io.stream.DaemonStream;
 import org.apache.solr.client.solrj.io.stream.ExceptionStream;
+import org.apache.solr.client.solrj.io.stream.MonitorStream;
 import org.apache.solr.client.solrj.io.stream.StreamContext;
 import org.apache.solr.client.solrj.io.stream.TupleStream;
 import org.apache.solr.client.solrj.io.stream.expr.Explanation;
@@ -239,6 +240,9 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       rsp.add("explanation", tupleStream.toExplanation(this.streamFactory));
     }
 
+    if (tupleStream instanceof MonitorStream) {
+      tupleStream = ((MonitorStream)tupleStream).getDaemonStream();
+    }
     if (tupleStream instanceof DaemonStream) {
       DaemonStream daemonStream = (DaemonStream) tupleStream;
       if (daemons.containsKey(daemonStream.getId())) {
@@ -247,7 +251,8 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       daemonStream.setDaemons(daemons);
       daemonStream.open(); // This will start the deamonStream
       daemons.put(daemonStream.getId(), daemonStream);
-      rsp.add("result-set", new DaemonResponseStream("Deamon:" + daemonStream.getId() + " started on " + coreName));
+      rsp.add("result-set", new DaemonResponseStream("Daemon:" + daemonStream.getId() + " started on " + coreName));
+
     } else {
       rsp.add("result-set", new TimerStream(new ExceptionStream(tupleStream)));
     }
