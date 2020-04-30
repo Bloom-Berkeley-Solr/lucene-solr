@@ -19,6 +19,7 @@ package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
 import java.net.URI;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -43,7 +44,7 @@ import org.apache.solr.common.SolrException;
 
 
 public class AlertStream extends TupleStream implements Expressible {
-
+  CloseableHttpClient httpClient;
   TupleStream tupleStream;
   String targetURL;
 
@@ -63,13 +64,13 @@ public class AlertStream extends TupleStream implements Expressible {
     init(tupleStream, targetURL);
   }
 
+  public AlertStream(TupleStream tupleStream, String targetURL) {
+    init(tupleStream, targetURL);
+  }
+
   public void init(TupleStream tupleStream, String targetURL) {
     this.tupleStream = tupleStream;
     this.targetURL = targetURL;
-  }
-
-  public AlertStream(TupleStream tupleStream, String targetURL) {
-    init(tupleStream, targetURL);
   }
 
   @Override
@@ -87,11 +88,13 @@ public class AlertStream extends TupleStream implements Expressible {
   @Override
   public void open() throws IOException {
     tupleStream.open();
+    httpClient = HttpClients.createDefault();
   }
 
   @Override
   public void close() throws IOException {
     tupleStream.close();
+    httpClient.close();
   }
 
   @Override
@@ -130,17 +133,16 @@ public class AlertStream extends TupleStream implements Expressible {
 
   void alert(Tuple tuple) throws IOException {
     try {
-      Map<String, Map> requestBody = new HashMap<String, Map>();
-      requestBody.put("matches", tuple.fields);
+      Map<String, String> requestBody = new HashMap<String, String>();
+      requestBody.put("matches", tuple.fields.toString());
+      requestBody.put("requestTime", new Timestamp(System.currentTimeMillis()).toString());
 
-      CloseableHttpClient httpClient = HttpClients.createDefault();
+
       HttpPost httpPost= new HttpPost((URI.create(targetURL)));
       httpPost.setEntity(new StringEntity(requestBody.toString()));
 
       httpClient.execute(httpPost);
       //TODO: Error handling for non-successful response code
-
-      httpClient.close();
     } catch (ClientProtocolException cpe) {
       // Currently detecting authentication by string-matching the HTTP response
       // Perhaps SolrClient should have thrown an exception itself??

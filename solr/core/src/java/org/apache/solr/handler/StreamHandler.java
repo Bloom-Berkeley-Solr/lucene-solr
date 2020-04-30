@@ -240,6 +240,9 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       rsp.add("explanation", tupleStream.toExplanation(this.streamFactory));
     }
 
+    if (tupleStream instanceof MonitorStream) {
+      tupleStream = ((MonitorStream)tupleStream).getDaemonStream();
+    }
     if (tupleStream instanceof DaemonStream) {
       DaemonStream daemonStream = (DaemonStream) tupleStream;
       if (daemons.containsKey(daemonStream.getId())) {
@@ -250,19 +253,7 @@ public class StreamHandler extends RequestHandlerBase implements SolrCoreAware, 
       daemons.put(daemonStream.getId(), daemonStream);
       rsp.add("result-set", new DaemonResponseStream("Daemon:" + daemonStream.getId() + " started on " + coreName));
 
-    } else if (tupleStream instanceof MonitorStream) {
-      MonitorStream monitorStream = (MonitorStream) tupleStream;
-      DaemonStream daemonStream = monitorStream.getDaemonStream();
-      if (daemons.containsKey(daemonStream.getId())) {
-        daemons.remove(daemonStream.getId()).close();
-      }
-      daemonStream.setDaemons(daemons);
-      daemonStream.open(); // This will start the deamonStream
-      daemons.put(daemonStream.getId(), daemonStream);
-      rsp.add("result-set", new DaemonResponseStream("Daemon:" + daemonStream.getId() + " started on " + coreName));
-    }
-
-    else {
+    } else {
       rsp.add("result-set", new TimerStream(new ExceptionStream(tupleStream)));
     }
   }

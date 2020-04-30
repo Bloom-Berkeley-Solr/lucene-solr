@@ -91,8 +91,7 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         .configure();
 
     String collection;
-//    useAlias = random().nextBoolean();
-    useAlias = false;
+    useAlias = random().nextBoolean();
 
     if (useAlias) {
       collection = COLLECTIONORALIAS + "_collection";
@@ -2151,9 +2150,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @Test
   public void testMonitorStream() throws Exception {
-    // Uncomment to always run  test with useAlias = False
-     Assume.assumeTrue(!useAlias);
-
     CollectionAdminRequest.createCollection("destinationCollection", "conf", 2, 1).process(cluster.getSolrClient());
     cluster.waitForActiveCollection("destinationCollection", 2, 2);
 
@@ -2247,8 +2243,6 @@ public class StreamExpressionTest extends SolrCloudTestCase {
 
   @Test
   public void testAlertStream() throws Exception {
-    Assume.assumeTrue(!useAlias);
-
     new UpdateRequest()
         .add(id, "0", "a_s", "hello", "a_i", "0", "a_f", "1")
         .add(id, "2", "a_s", "hello", "a_i", "2", "a_f", "2")
@@ -2285,10 +2279,12 @@ public class StreamExpressionTest extends SolrCloudTestCase {
         StreamContext context = new StreamContext();
         context.setSolrClientCache(cache);
         astream.setStreamContext(context);
-
+        astream.open();
         // Mock the alert stream
         astream = Mockito.spy(astream);
         doNothing().when(astream).alert(any(Tuple.class));
+
+
         // The initial call to the topic function establishes the checkpoints for the specific topic ID
         getTuples(astream);
 
