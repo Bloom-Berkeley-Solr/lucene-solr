@@ -41,6 +41,7 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 import org.apache.solr.common.SolrException;
+import org.apache.solr.common.util.SuppressForbidden;
 
 
 public class AlertStream extends TupleStream implements Expressible {
@@ -131,6 +132,7 @@ public class AlertStream extends TupleStream implements Expressible {
       .withExpression(toExpression(factory).toString());
   }
 
+  @SuppressForbidden(reason = "Needs currentTimeMillis to send request time")
   void alert(Tuple tuple) throws IOException {
     try {
       Map<String, String> requestBody = new HashMap<String, String>();
